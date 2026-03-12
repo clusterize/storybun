@@ -8,7 +8,7 @@ import { watchFiles } from "./watcher.ts";
 
 const cwd = process.cwd();
 
-async function main() {
+async function dev() {
   const config = await loadConfig(cwd);
   console.log("Scanning stories...");
 
@@ -50,6 +50,33 @@ async function main() {
     }
     rebuild();
   });
+}
+
+async function snapshot() {
+  const { runSnapshots } = await import("./snapshot/index.ts");
+  const args = process.argv.slice(2).filter((a) => a !== "snapshot");
+
+  const update = args.includes("--update") || args.includes("-u");
+  const codeowners = args.includes("--codeowners");
+
+  let filter: string | undefined;
+  const filterIdx = args.indexOf("--filter");
+  if (filterIdx !== -1 && args[filterIdx + 1]) {
+    filter = args[filterIdx + 1];
+  }
+
+  const exitCode = await runSnapshots(cwd, { update, filter, codeowners });
+  process.exit(exitCode);
+}
+
+async function main() {
+  const command = process.argv[2];
+
+  if (command === "snapshot") {
+    await snapshot();
+  } else {
+    await dev();
+  }
 }
 
 main().catch((err) => {

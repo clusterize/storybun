@@ -1,5 +1,7 @@
 {
   "name": "storybun",
+  "version": "0.1.0",
+  "description": "A visual regression testing tool made for Bun",
   "type": "module",
   "bin": { "storybun": "./src/cli.ts" },
   "exports": {

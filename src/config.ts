@@ -1,11 +1,21 @@
 import { join } from "path";
-import type { ResolvedConfig, StorybunConfig } from "./types.ts";
+import type { ResolvedConfig, ResolvedSnapshotConfig, StorybunConfig } from "./types.ts";
+
+const snapshotDefaults: ResolvedSnapshotConfig = {
+  outDir: "__snapshots__",
+  threshold: 0.1,
+  viewports: [{ width: 1280, height: 720 }],
+  waitTimeout: 0,
+  concurrency: 4,
+  codeowners: [],
+};
 
 const defaults: ResolvedConfig = {
   stories: ["**/*.stories.tsx"],
   port: 5175,
   plugins: [],
   components: {},
+  snapshot: snapshotDefaults,
 };
 
 export async function loadConfig(cwd: string): Promise<ResolvedConfig> {
@@ -24,5 +34,6 @@ export async function loadConfig(cwd: string): Promise<ResolvedConfig> {
     port: userConfig.port ?? defaults.port,
     plugins: userConfig.plugins ?? [],
     components: { ...defaults.components, ...userConfig.components },
+    snapshot: { ...snapshotDefaults, ...userConfig.snapshot },
   };
 }

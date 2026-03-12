@@ -5,6 +5,15 @@ export interface StoryMeta {
   exports: string[];
 }
 
+export interface SnapshotConfig {
+  outDir?: string;
+  threshold?: number;
+  viewports?: { width: number; height: number; name?: string }[];
+  waitTimeout?: number;
+  concurrency?: number;
+  codeowners?: string[];
+}
+
 export interface StorybunConfig {
   stories?: string[];
   port?: number;
@@ -14,6 +23,16 @@ export interface StorybunConfig {
     Sidebar?: string;
     Wrapper?: string;
   };
+  snapshot?: SnapshotConfig;
+}
+
+export interface ResolvedSnapshotConfig {
+  outDir: string;
+  threshold: number;
+  viewports: { width: number; height: number; name?: string }[];
+  waitTimeout: number;
+  concurrency: number;
+  codeowners: string[];
 }
 
 export interface ResolvedConfig {
@@ -25,6 +44,7 @@ export interface ResolvedConfig {
     Sidebar?: string;
     Wrapper?: string;
   };
+  snapshot: ResolvedSnapshotConfig;
 }
 
 export interface StoryEntry {

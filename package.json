@@ -7,14 +7,26 @@
     "./ui": "./src/ui/index.tsx",
     "./ui/styles.css": "./src/ui/styles.css"
   },
+  "dependencies": {
+    "pixelmatch": "^6.0.0",
+    "pngjs": "^7.0.0"
+  },
   "peerDependencies": {
+    "playwright": "^1.40.0",
     "react": "^18 || ^19",
     "react-dom": "^18 || ^19"
   },
+  "peerDependenciesMeta": {
+    "playwright": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/pngjs": "^6.0.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "playwright": "^1.50.0",
     "react": "^19",
     "react-dom": "^19"
   }

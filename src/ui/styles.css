@@ -1,0 +1,528 @@
+/* ============================================
+   Storybun — Design System
+   ============================================
+   ISOLATION STRATEGY:
+   All styles are scoped to storybun's own elements via [class^="storybun-"]
+   or [class*=" storybun-"] selectors. No global * resets. No inheritable
+   properties (font-family, color, etc.) on layout containers that wrap
+   story content. Stories always receive browser defaults.
+   ============================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+/* ---- Design Tokens ---- */
+
+:root {
+  /* Layout */
+  --sb-sidebar-width: 280px;
+  --sb-topbar-height: 52px;
+
+  /* Radius */
+  --sb-radius-sm: 6px;
+  --sb-radius-md: 8px;
+  --sb-radius-lg: 12px;
+
+  /* Timing */
+  --sb-transition-fast: 120ms ease;
+  --sb-transition-normal: 200ms ease;
+  --sb-transition-slow: 320ms ease;
+
+  /* Typography */
+  --sb-font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --sb-font-mono: "JetBrains Mono", "Fira Code", "SF Mono", "Cascadia Code", ui-monospace, monospace;
+
+  /* Dark theme (default) */
+  --sb-bg: #09090b;
+  --sb-bg-sidebar: #111113;
+  --sb-bg-surface: #18181b;
+  --sb-bg-hover: rgba(255, 255, 255, 0.05);
+  --sb-bg-active: rgba(245, 158, 11, 0.08);
+  --sb-border: rgba(255, 255, 255, 0.07);
+  --sb-border-strong: rgba(255, 255, 255, 0.12);
+  --sb-text: #fafafa;
+  --sb-text-secondary: #a1a1aa;
+  --sb-text-muted: #52525b;
+  --sb-accent: #f59e0b;
+  --sb-accent-hover: #fbbf24;
+  --sb-accent-subtle: rgba(245, 158, 11, 0.12);
+  --sb-accent-glow: rgba(245, 158, 11, 0.1);
+  --sb-error-bg: rgba(239, 68, 68, 0.08);
+  --sb-error-border: rgba(239, 68, 68, 0.15);
+  --sb-error-text: #fca5a5;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --sb-bg: #fafaf9;
+    --sb-bg-sidebar: #f5f5f4;
+    --sb-bg-surface: #ffffff;
+    --sb-bg-hover: rgba(0, 0, 0, 0.04);
+    --sb-bg-active: rgba(217, 119, 6, 0.08);
+    --sb-border: rgba(0, 0, 0, 0.08);
+    --sb-border-strong: rgba(0, 0, 0, 0.12);
+    --sb-text: #1c1917;
+    --sb-text-secondary: #78716c;
+    --sb-text-muted: #a8a29e;
+    --sb-accent: #d97706;
+    --sb-accent-hover: #b45309;
+    --sb-accent-subtle: rgba(217, 119, 6, 0.1);
+    --sb-accent-glow: rgba(217, 119, 6, 0.12);
+    --sb-error-bg: rgba(239, 68, 68, 0.06);
+    --sb-error-border: rgba(239, 68, 68, 0.15);
+    --sb-error-text: #dc2626;
+  }
+}
+
+/* ---- Scoped Reset ----
+   Only target storybun's own elements — never story content. */
+
+[class^="storybun-"],
+[class*=" storybun-"],
+[class^="storybun-"]::before,
+[class^="storybun-"]::after,
+[class*=" storybun-"]::before,
+[class*=" storybun-"]::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* Minimal page setup for full-height layout — no font/color set */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* ---- Layout ----
+   .storybun-layout and .storybun-content are structural containers
+   that wrap story content. They must NOT set any inheritable CSS
+   properties (font-family, color, line-height, etc.) so stories
+   always receive unaltered browser defaults. */
+
+.storybun-layout {
+  display: flex;
+  height: 100%;
+  background: var(--sb-bg);
+}
+
+/* ---- Sidebar ---- */
+
+.storybun-sidebar {
+  width: var(--sb-sidebar-width);
+  min-width: var(--sb-sidebar-width);
+  background: var(--sb-bg-sidebar);
+  border-right: 1px solid var(--sb-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: var(--sb-font-sans);
+  color: var(--sb-text);
+}
+
+/* ---- Topbar ---- */
+
+.storybun-topbar {
+  height: var(--sb-topbar-height);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--sb-border);
+  flex-shrink: 0;
+}
+
+.storybun-logo-icon {
+  flex-shrink: 0;
+  color: var(--sb-text-secondary);
+}
+
+.storybun-logo-text {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--sb-text);
+}
+
+/* ---- Search ---- */
+
+.storybun-sidebar-search {
+  padding: 12px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.storybun-search-icon {
+  position: absolute;
+  left: 22px;
+  color: var(--sb-text-muted);
+  pointer-events: none;
+  transition: color var(--sb-transition-fast);
+  flex-shrink: 0;
+}
+
+.storybun-sidebar-search:focus-within .storybun-search-icon {
+  color: var(--sb-accent);
+}
+
+.storybun-sidebar-search input {
+  width: 100%;
+  padding: 8px 36px 8px 34px;
+  border: 1px solid var(--sb-border);
+  border-radius: var(--sb-radius-sm);
+  font-size: 13px;
+  font-family: var(--sb-font-sans);
+  background: var(--sb-bg);
+  color: var(--sb-text);
+  outline: none;
+  transition: border-color var(--sb-transition-fast), box-shadow var(--sb-transition-fast), background var(--sb-transition-fast);
+}
+
+.storybun-sidebar-search input::placeholder {
+  color: var(--sb-text-muted);
+}
+
+.storybun-sidebar-search input:focus {
+  border-color: var(--sb-accent);
+  box-shadow: 0 0 0 3px var(--sb-accent-glow);
+  background: var(--sb-bg-surface);
+}
+
+.storybun-search-kbd {
+  position: absolute;
+  right: 22px;
+  font-family: var(--sb-font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--sb-text-muted);
+  background: var(--sb-bg-surface);
+  border: 1px solid var(--sb-border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  pointer-events: none;
+  line-height: 1;
+  transition: opacity var(--sb-transition-fast);
+}
+
+.storybun-sidebar-search:focus-within .storybun-search-kbd {
+  opacity: 0;
+}
+
+.storybun-search-clear {
+  position: absolute;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: none;
+  color: var(--sb-text-muted);
+  cursor: pointer;
+  border-radius: 50%;
+  padding: 0;
+  transition: color var(--sb-transition-fast), background var(--sb-transition-fast);
+}
+
+.storybun-search-clear:hover {
+  color: var(--sb-text);
+  background: var(--sb-bg-hover);
+}
+
+/* ---- Tree Navigation ---- */
+
+.storybun-sidebar-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0;
+
+  /* Firefox scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: var(--sb-border) transparent;
+}
+
+.storybun-sidebar-tree::-webkit-scrollbar {
+  width: 6px;
+}
+
+.storybun-sidebar-tree::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.storybun-sidebar-tree::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+
+.storybun-sidebar-tree:hover::-webkit-scrollbar-thumb {
+  background: var(--sb-border-strong);
+}
+
+.storybun-sidebar-tree::-webkit-scrollbar-thumb:hover {
+  background: var(--sb-text-muted);
+}
+
+.storybun-group-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  margin: 1px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sb-text-secondary);
+  cursor: pointer;
+  user-select: none;
+  border-radius: var(--sb-radius-sm);
+  transition: background var(--sb-transition-fast), color var(--sb-transition-fast);
+}
+
+.storybun-group-label:hover {
+  background: var(--sb-bg-hover);
+  color: var(--sb-text);
+}
+
+.storybun-group-chevron {
+  flex-shrink: 0;
+  color: var(--sb-text-muted);
+  transition: transform var(--sb-transition-fast), color var(--sb-transition-fast);
+}
+
+.storybun-group-label:hover .storybun-group-chevron {
+  color: var(--sb-text-secondary);
+}
+
+.storybun-group-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.storybun-group-children {
+  margin-left: 10px;
+  padding-left: 4px;
+  border-left: 1px solid var(--sb-border);
+  margin-top: 2px;
+  margin-bottom: 4px;
+}
+
+/* ---- Story Items ---- */
+
+.storybun-story-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin: 1px 6px;
+  font-size: 12.5px;
+  font-weight: 400;
+  cursor: pointer;
+  user-select: none;
+  color: var(--sb-text-secondary);
+  text-decoration: none;
+  border: none;
+  background: none;
+  width: calc(100% - 12px);
+  text-align: left;
+  font-family: var(--sb-font-sans);
+  border-radius: var(--sb-radius-sm);
+  position: relative;
+  transition: background var(--sb-transition-fast), color var(--sb-transition-fast);
+}
+
+.storybun-story-item:hover {
+  background: var(--sb-bg-hover);
+  color: var(--sb-text);
+}
+
+.storybun-story-item.active {
+  background: var(--sb-accent-subtle);
+  color: var(--sb-accent);
+  font-weight: 500;
+}
+
+.storybun-story-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+  background: var(--sb-accent);
+  border-radius: 1px;
+}
+
+/* ---- Content Area ----
+   No inheritable properties here — story content must be unstyled. */
+
+.storybun-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--sb-bg);
+  animation: sb-fadeIn 0.3s ease;
+}
+
+.storybun-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  overflow: auto;
+}
+
+/* ---- Empty State ----
+   Explicit font-family/color on all text since nothing inherits. */
+
+.storybun-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--sb-font-sans);
+}
+
+.storybun-empty-icon {
+  color: var(--sb-text-muted);
+  opacity: 0.4;
+  animation: sb-float 4s ease-in-out infinite;
+}
+
+.storybun-empty-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sb-text-secondary);
+}
+
+.storybun-empty-hint {
+  font-size: 12px;
+  color: var(--sb-text-muted);
+}
+
+.storybun-empty-hint kbd {
+  background: var(--sb-bg-surface);
+  border: 1px solid var(--sb-border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--sb-font-sans);
+  color: var(--sb-text-secondary);
+}
+
+/* ---- Loading State ---- */
+
+.storybun-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.storybun-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2.5px solid var(--sb-border-strong);
+  border-top-color: var(--sb-accent);
+  border-radius: 50%;
+  animation: sb-spin 0.7s linear infinite;
+}
+
+/* ---- Error State ---- */
+
+.storybun-error {
+  padding: 20px;
+  background: var(--sb-error-bg);
+  border: 1px solid var(--sb-error-border);
+  border-radius: var(--sb-radius-md);
+  max-width: 600px;
+  font-family: var(--sb-font-sans);
+  color: var(--sb-error-text);
+}
+
+.storybun-error-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sb-error-text);
+  margin-bottom: 10px;
+}
+
+.storybun-error pre {
+  font-family: var(--sb-font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--sb-error-text);
+  opacity: 0.75;
+  margin: 0;
+}
+
+/* ---- Animations ---- */
+
+@keyframes sb-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes sb-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes sb-fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes sb-fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Staggered entry for sidebar tree items */
+.storybun-sidebar-tree > div {
+  animation: sb-fadeSlideIn 0.4s ease both;
+}
+.storybun-sidebar-tree > div:nth-child(2) { animation-delay: 0.03s; }
+.storybun-sidebar-tree > div:nth-child(3) { animation-delay: 0.06s; }
+.storybun-sidebar-tree > div:nth-child(4) { animation-delay: 0.09s; }
+.storybun-sidebar-tree > div:nth-child(5) { animation-delay: 0.12s; }
+.storybun-sidebar-tree > div:nth-child(6) { animation-delay: 0.15s; }
+.storybun-sidebar-tree > div:nth-child(7) { animation-delay: 0.18s; }
+.storybun-sidebar-tree > div:nth-child(8) { animation-delay: 0.21s; }
+.storybun-sidebar-tree > div:nth-child(9) { animation-delay: 0.24s; }
+.storybun-sidebar-tree > div:nth-child(10) { animation-delay: 0.27s; }
+
+/* ---- Accessibility ---- */
+
+.storybun-sidebar *:focus-visible {
+  outline: 2px solid var(--sb-accent);
+  outline-offset: -1px;
+  border-radius: var(--sb-radius-sm);
+}
+
+/* Scoped to storybun elements only — never suppress story animations */
+@media (prefers-reduced-motion: reduce) {
+  [class^="storybun-"],
+  [class*=" storybun-"],
+  [class^="storybun-"]::before,
+  [class^="storybun-"]::after,
+  [class*=" storybun-"]::before,
+  [class*=" storybun-"]::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,7 +1,7 @@
-import { join, basename, dirname } from "path";
+import { join, basename } from "path";
 import { tmpdir } from "os";
-import type { BunPlugin } from "bun";
 import type { ResolvedConfig, StoryEntry, PackageInfo } from "./types.ts";
+import { findReactResolveDir, createReactPlugin } from "./build-utils.ts";
 
 const STORYBUN_UI = join(import.meta.dir, "ui", "index.tsx");
 const STORYBUN_CSS = join(import.meta.dir, "ui", "styles.css");
@@ -148,23 +148,6 @@ ${wsScript}
 </html>`;
 }
 
-function findReactResolveDir(stories: StoryEntry[], cwd: string): string {
-  try {
-    Bun.resolveSync("react", cwd);
-    return cwd;
-  } catch {}
-
-  const dirs = new Set(stories.map((s) => dirname(s.filePath)));
-  for (const dir of dirs) {
-    try {
-      Bun.resolveSync("react", dir);
-      return dir;
-    } catch {}
-  }
-
-  return cwd;
-}
-
 export async function buildAll(
   stories: StoryEntry[],
   packages: Map<string, PackageInfo>,
@@ -175,19 +158,8 @@ export async function buildAll(
   const virtualPath = join(cwd, "_storybun_entry.tsx");
   const virtualEntryCode = generateVirtualEntry(stories, packages, config, cwd);
 
-  // Force all react/react-dom imports to resolve from the user's cwd,
-  // avoiding dual-React when storybun's own node_modules has a different copy.
-  // In monorepos with isolated linker, React may not be hoisted to root —
-  // fall back to resolving from a story file's directory.
   const reactDir = findReactResolveDir(stories, cwd);
-  const reactPlugin: BunPlugin = {
-    name: "resolve-react",
-    setup(build) {
-      build.onResolve({ filter: /^react(-dom)?(\/.*)?$/ }, (args) => {
-        return { path: Bun.resolveSync(args.path, reactDir) };
-      });
-    },
-  };
+  const reactPlugin = createReactPlugin(reactDir);
 
   // Merge plugins: react plugin + root-level + all per-package plugins
   const allPackagePlugins = [...packages.values()].flatMap(

@@ -1,14 +1,15 @@
 import { watch, readdirSync, statSync, type FSWatcher } from "fs";
 import { join } from "path";
 
-const IGNORE = new Set(["node_modules", ".git", "_storybun_entry"]);
+const ALWAYS_IGNORE = ["node_modules", ".git", "_storybun_entry"];
 
 /**
  * On macOS, fs.watch recursive uses FSEvents (efficient, single fd).
  * On Linux, it uses inotify (one fd per directory), which causes EMFILE
  * in large repos. We manually walk and watch only non-ignored dirs.
  */
-export function watchFiles(cwd: string, onChange: () => void) {
+export function watchFiles(cwd: string, onChange: () => void, ignore: string[] = []) {
+  const IGNORE = new Set([...ALWAYS_IGNORE, ...ignore]);
   let timeout: ReturnType<typeof setTimeout> | null = null;
 
   function debounced() {
@@ -20,7 +21,7 @@ export function watchFiles(cwd: string, onChange: () => void) {
     // macOS: single efficient recursive watcher via FSEvents
     return watch(cwd, { recursive: true }, (_event, filename) => {
       if (!filename) return;
-      if (IGNORE.has(filename.split("/")[0])) return;
+      if (filename.split("/").some((part) => IGNORE.has(part))) return;
       debounced();
     });
   }

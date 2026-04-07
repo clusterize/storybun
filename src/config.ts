@@ -12,6 +12,7 @@ const snapshotDefaults: ResolvedSnapshotConfig = {
 
 const defaults: ResolvedConfig = {
   stories: ["**/*.stories.tsx"],
+  ignore: [],
   port: 5175,
   plugins: [],
   components: {},
@@ -31,6 +32,7 @@ export async function loadConfig(cwd: string): Promise<ResolvedConfig> {
 
   return {
     stories: userConfig.stories ?? defaults.stories,
+    ignore: userConfig.ignore ?? defaults.ignore,
     port: userConfig.port ?? defaults.port,
     plugins: userConfig.plugins ?? [],
     components: { ...defaults.components, ...userConfig.components },

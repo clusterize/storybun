@@ -49,7 +49,7 @@ async function dev() {
       return;
     }
     rebuild();
-  });
+  }, config.ignore);
 }
 
 async function snapshot() {

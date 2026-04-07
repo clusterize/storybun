@@ -34,8 +34,9 @@ export async function scanStories(
   for (const pattern of config.stories) {
     const glob = new Bun.Glob(pattern);
     for await (const match of glob.scan({ cwd, absolute: true })) {
-      // Skip node_modules
+      // Skip ignored directories
       if (match.includes("node_modules")) continue;
+      if (config.ignore.some((dir) => match.includes(`/${dir}/`))) continue;
       // Dedupe across patterns
       if (seen.has(match)) continue;
       seen.add(match);

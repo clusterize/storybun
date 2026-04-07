@@ -16,6 +16,7 @@ export interface SnapshotConfig {
 
 export interface StorybunConfig {
   stories?: string[];
+  ignore?: string[];
   port?: number;
   plugins?: BunPlugin[];
   components?: {
@@ -37,6 +38,7 @@ export interface ResolvedSnapshotConfig {
 
 export interface ResolvedConfig {
   stories: string[];
+  ignore: string[];
   port: number;
   plugins: BunPlugin[];
   components: {

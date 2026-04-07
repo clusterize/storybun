@@ -21,7 +21,7 @@ export function watchFiles(cwd: string, onChange: () => void, ignore: string[] =
     // macOS: single efficient recursive watcher via FSEvents
     return watch(cwd, { recursive: true }, (_event, filename) => {
       if (!filename) return;
-      if (IGNORE.has(filename.split("/")[0])) return;
+      if (filename.split("/").some((part) => IGNORE.has(part))) return;
       debounced();
     });
   }

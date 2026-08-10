@@ -24,6 +24,40 @@ function storyOutputPath(
   return `${outDir}/${key}-${vpName}.png`;
 }
 
+function resolveFixedTime(clock: string | null): Date | null {
+  if (!clock) return null;
+  const time = new Date(clock);
+  if (Number.isNaN(time.getTime())) {
+    throw new Error(
+      `Invalid snapshot.clock: ${JSON.stringify(clock)} is not a parseable date.`,
+    );
+  }
+  return time;
+}
+
+/**
+ * A page pinned to a deterministic environment. Timezone and locale are fixed so
+ * a developer's machine renders what CI renders, and a fixed time freezes
+ * `Date.now()` and `new Date()` so components that read the wall clock -- relative
+ * timestamps, elapsed-time tickers -- paint the same pixels on every run instead
+ * of diffing against their own baseline. Timers keep running and only the reported
+ * time is frozen, so nothing that awaits a timeout can deadlock.
+ */
+async function createPage(
+  browser: Browser,
+  config: ResolvedSnapshotConfig,
+  fixedTime: Date | null,
+): Promise<Page> {
+  const page = await browser.newPage({
+    timezoneId: config.timezoneId,
+    locale: config.locale,
+  });
+  if (fixedTime) {
+    await page.clock.setFixedTime(fixedTime);
+  }
+  return page;
+}
+
 export async function captureAll(
   browser: Browser,
   stories: StoryEntry[],
@@ -68,8 +102,11 @@ export async function captureAll(
 
   // Process with concurrency pool
   const concurrency = Math.min(config.concurrency, work.length || 1);
+  const fixedTime = resolveFixedTime(config.clock);
   const pages = await Promise.all(
-    Array.from({ length: concurrency }, () => browser.newPage()),
+    Array.from({ length: concurrency }, () =>
+      createPage(browser, config, fixedTime),
+    ),
   );
 
   let cursor = 0;

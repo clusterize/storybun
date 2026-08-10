@@ -8,6 +8,9 @@ const snapshotDefaults: ResolvedSnapshotConfig = {
   waitTimeout: 0,
   concurrency: 4,
   codeowners: [],
+  clock: null,
+  timezoneId: "UTC",
+  locale: "en-US",
 };
 
 const defaults: ResolvedConfig = {

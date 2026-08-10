@@ -14,7 +14,7 @@
     "pngjs": "^7.0.0"
   },
   "peerDependencies": {
-    "playwright": "^1.40.0",
+    "playwright": "^1.45.0",
     "react": "^18 || ^19",
     "react-dom": "^18 || ^19"
   },

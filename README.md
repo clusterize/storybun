@@ -76,6 +76,48 @@ export default {
 } satisfies StorybunConfig;
 ```
 
+### Visual Snapshots
+
+`bunx storybun snapshot` renders every story in headless Chromium and compares it
+against the baseline in `outDir`, writing `<story>.actual.png` and
+`<story>.diff.png` for anything that moved. `--update` accepts the current render
+as the new baseline.
+
+```ts
+export default {
+  snapshot: {
+    // Where baselines live (default: "__snapshots__")
+    outDir: "__snapshots__",
+
+    // Percentage of differing pixels tolerated (default: 0.1)
+    threshold: 0.1,
+
+    // Viewports to capture each story at (default: one 1280x720 shot)
+    viewports: [{ width: 1280, height: 720 }],
+
+    // Extra settle time in ms after the story signals ready (default: 0)
+    waitTimeout: 0,
+
+    // Pages captured in parallel (default: 4)
+    concurrency: 4,
+
+    // Freeze `Date.now()` and `new Date()` at this instant. Without it, any
+    // story that renders a relative timestamp ("6 minutes ago") or a ticking
+    // duration diffs against its own baseline on every run.
+    clock: "2026-07-30T12:00:00.000Z",
+
+    // Page timezone and locale, fixed so local runs match CI
+    timezoneId: "UTC",
+    locale: "en-US",
+  },
+} satisfies StorybunConfig;
+```
+
+Timers keep running under `clock` — only the reported time is frozen — so a
+component polling on an interval simply re-renders the same output. Story
+fixtures should therefore express timestamps at or before the frozen instant, so
+that relative labels read as the past.
+
 ### Monorepo / Per-Package Config
 
 In a monorepo, storybun discovers each story's nearest `package.json` and groups stories by package. Each package can have its own `storybun.config.ts` with per-package plugins and a custom `Wrapper`:

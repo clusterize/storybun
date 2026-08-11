@@ -12,6 +12,17 @@ export interface SnapshotConfig {
   waitTimeout?: number;
   concurrency?: number;
   codeowners?: string[];
+  /**
+   * Instant to freeze the page clock at, as anything `new Date()` parses.
+   * `Date.now()` and `new Date()` then return it on every run, so components
+   * that read the wall clock render identical pixels instead of diffing
+   * against their own baseline. Unset leaves the real clock in place.
+   */
+  clock?: string | null;
+  /** IANA timezone for the page (default: "UTC"). */
+  timezoneId?: string;
+  /** Locale for the page, driving `Intl` output (default: "en-US"). */
+  locale?: string;
 }
 
 export interface StorybunConfig {
@@ -34,6 +45,9 @@ export interface ResolvedSnapshotConfig {
   waitTimeout: number;
   concurrency: number;
   codeowners: string[];
+  clock: string | null;
+  timezoneId: string;
+  locale: string;
 }
 
 export interface ResolvedConfig {

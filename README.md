@@ -36,6 +36,15 @@ bunx storybun
 
 Open [http://localhost:5175](http://localhost:5175).
 
+## CLI
+
+```
+storybun                       Start the dev server
+storybun snapshot [options]    Capture every story and compare against its baseline
+storybun list [options]        Print every story key
+storybun shot <story> [opts]   Write a PNG of one story, leaving baselines untouched
+```
+
 ## Story Format
 
 Each `.stories.tsx` file exports named components. Every named export becomes a story:
@@ -117,6 +126,30 @@ Timers keep running under `clock` — only the reported time is frozen — so a
 component polling on an interval simply re-renders the same output. Story
 fixtures should therefore express timestamps at or before the frozen instant, so
 that relative labels read as the past.
+
+### Single Snapshots
+
+`storybun snapshot` is a regression check: it owns `outDir` and rewrites what it
+finds there. When you just want a picture of one component -- to eyeball a change,
+attach to a review, or hand to a tool that cannot drive a browser -- use `shot`,
+which writes exactly where you point it and never reads or replaces a baseline.
+
+```bash
+storybun list                                   # every story key
+storybun list --filter Button --json            # machine-readable, narrowed
+
+storybun shot 'Components/Button--Primary' -o button.png
+storybun shot Primary --viewport 800x600        # unique substrings resolve too
+storybun shot 'Components/Table--Wide' --full-page
+```
+
+The key is `<story path>--<export>`, exactly as `list` prints it. A query that
+matches nothing, or matches more than one story, exits non-zero and lists the
+candidates rather than guessing.
+
+The page is set up exactly as it is for baselines -- same wrappers, plugins,
+frozen `clock`, `timezoneId` and `locale` -- so a `shot` shows what the baseline
+run sees. Playwright is still required; `shot` only saves you from driving it.
 
 ### Monorepo / Per-Package Config
 

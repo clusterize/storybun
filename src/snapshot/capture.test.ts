@@ -5,7 +5,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import { PNG } from "pngjs";
 import { buildSnapshotEntry } from "./entry.ts";
 import { startSnapshotServer } from "./server.ts";
-import { captureAll, captureStoryOrPage } from "./capture.ts";
+import { captureAll, captureOne, captureStoryOrPage } from "./capture.ts";
 import type { PackageInfo, ResolvedConfig, ResolvedSnapshotConfig, StoryEntry } from "../types.ts";
 
 // tsconfig has no "dom" lib; declare the one global this file touches
@@ -363,6 +363,57 @@ describe("captureAll (real call site)", () => {
     await expect(captureAll(browser, [schemeStory], config, serverUrl)).rejects.toThrow(
       /Invalid snapshot mode name/,
     );
+  }, 20_000);
+});
+
+describe("captureOne (shot)", () => {
+  let serverUrl: string;
+  let stopServer: () => void;
+
+  beforeAll(async () => {
+    const build = await buildSnapshotEntry(
+      [stories[0]!, schemeStory],
+      testPackages(),
+      testConfig(),
+      cwd,
+    );
+    const server = startSnapshotServer(build);
+    serverUrl = `http://localhost:${server.port}`;
+    stopServer = () => server.stop();
+  }, 20_000);
+
+  afterAll(() => {
+    stopServer();
+  }, 20_000);
+
+  test("crops to the story's own rendered box, exactly as a baseline would", async () => {
+    const buffer = await captureOne(browser, testConfig().snapshot, serverUrl, {
+      storyKey: "fixtures/narrow--Badge",
+      viewport: { width: 800, height: 600 },
+      mode: undefined,
+    });
+
+    expect(pngDimensions(buffer)).toEqual({ width: 120, height: 40 });
+  }, 20_000);
+
+  test("renders in the light scheme when no mode is given", async () => {
+    const buffer = await captureOne(browser, testConfig().snapshot, serverUrl, {
+      storyKey: "fixtures/scheme--Swatch",
+      viewport: { width: 800, height: 600 },
+      mode: undefined,
+    });
+
+    expect(pixelAt(buffer, 50, 30)).toEqual([255, 0, 0, 255]);
+  }, 20_000);
+
+  test("emulates the given mode's color scheme", async () => {
+    const buffer = await captureOne(browser, testConfig().snapshot, serverUrl, {
+      storyKey: "fixtures/scheme--Swatch",
+      viewport: { width: 800, height: 600 },
+      mode: { colorScheme: "dark" },
+    });
+
+    expect(pixelAt(buffer, 50, 30)).toEqual([0, 255, 0, 255]);
   }, 20_000);
 });
 

@@ -222,6 +222,70 @@ async function createPage(
   return page;
 }
 
+/**
+ * Navigate to a story and wait until it has painted. Shared by the baseline run
+ * and the single-story `shot` command so both observe the same readiness
+ * contract -- fonts loaded, two animation frames elapsed, plus any configured
+ * settle time -- and cannot drift into capturing at different moments.
+ */
+export async function renderStory(
+  page: Page,
+  serverUrl: string,
+  storyKey: string,
+  config: ResolvedSnapshotConfig,
+): Promise<void> {
+  const url = `${serverUrl}/snapshot?story=${encodeURIComponent(storyKey)}`;
+
+  await page.goto(url, { waitUntil: "networkidle" });
+
+  // Wait for the ready signal
+  await page.waitForFunction(
+    () => window.__STORYBUN_READY__ === true,
+    { timeout: 30_000 },
+  );
+
+  // Optional extra wait
+  if (config.waitTimeout > 0) {
+    await page.waitForTimeout(config.waitTimeout);
+  }
+}
+
+export interface ShotOptions {
+  storyKey: string;
+  viewport: { width: number; height: number };
+  /** Environment to capture in; `undefined` is the browser default, as for an unconfigured baseline run. */
+  mode: SnapshotMode | undefined;
+}
+
+/**
+ * Capture a single story to a PNG buffer, touching no baseline on disk.
+ *
+ * Goes through the same page setup, readiness wait and story-box crop as
+ * `captureAll`, so the image is byte-for-byte what a baseline run would write
+ * for this story in this mode and viewport -- not a viewport screenshot that
+ * merely resembles one.
+ */
+export async function captureOne(
+  browser: Browser,
+  config: ResolvedSnapshotConfig,
+  serverUrl: string,
+  options: ShotOptions,
+): Promise<Buffer> {
+  const page = await createPage(
+    browser,
+    config,
+    resolveFixedTime(config.clock),
+    options.mode,
+  );
+  try {
+    await page.setViewportSize(options.viewport);
+    await renderStory(page, serverUrl, options.storyKey, config);
+    return await captureStoryOrPage(page, options.storyKey);
+  } finally {
+    await page.close();
+  }
+}
+
 export async function captureAll(
   browser: Browser,
   stories: StoryEntry[],
@@ -300,20 +364,7 @@ export async function captureAll(
       });
 
       const storyKey = `${item.storyPath}--${item.exportName}`;
-      const url = `${serverUrl}/snapshot?story=${encodeURIComponent(storyKey)}`;
-
-      await page.goto(url, { waitUntil: "networkidle" });
-
-      // Wait for the ready signal
-      await page.waitForFunction(
-        () => window.__STORYBUN_READY__ === true,
-        { timeout: 30_000 },
-      );
-
-      // Optional extra wait
-      if (config.waitTimeout > 0) {
-        await page.waitForTimeout(config.waitTimeout);
-      }
+      await renderStory(page, serverUrl, storyKey, config);
 
       const buffer = await captureStoryOrPage(page, storyKey);
 

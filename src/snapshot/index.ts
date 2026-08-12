@@ -8,6 +8,7 @@ import { captureAll } from "./capture.ts";
 import { compareAll, updateBaselines } from "./compare.ts";
 import { printReport, printUpdateReport, getExitCode } from "./report.ts";
 import { updateCodeowners } from "./codeowners.ts";
+import { loadPlaywright } from "./playwright.ts";
 
 interface SnapshotOptions {
   update: boolean;
@@ -19,19 +20,8 @@ export async function runSnapshots(
   cwd: string,
   options: SnapshotOptions,
 ): Promise<number> {
-  // Check for Playwright
-  let playwright: typeof import("playwright");
-  try {
-    playwright = await import("playwright");
-  } catch {
-    console.error(
-      "Playwright is required for snapshots but not installed.\n" +
-        "Install it with:\n\n" +
-        "  bun add -d playwright\n" +
-        "  bunx playwright install chromium\n",
-    );
-    return 2;
-  }
+  const playwright = await loadPlaywright();
+  if (!playwright) return 2;
 
   const config = await loadConfig(cwd);
   const snapshotConfig = config.snapshot;

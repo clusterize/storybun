@@ -42,6 +42,14 @@ function resolveFixedTime(clock: string | null): Date | null {
  * timestamps, elapsed-time tickers -- paint the same pixels on every run instead
  * of diffing against their own baseline. Timers keep running and only the reported
  * time is frozen, so nothing that awaits a timeout can deadlock.
+ *
+ * A page is good for exactly ONE navigation once the clock is frozen. On the
+ * second and later `goto`, React still commits -- the DOM is fully populated --
+ * but the compositor never paints, and `page.screenshot()` returns a blank canvas
+ * while every wait in the loop reports success. Reusing a page therefore captures
+ * the first story correctly and writes every later story on that page as an empty
+ * image, with no error anywhere. `captureAll` takes a fresh page per story for
+ * that reason; see its comment before changing it back.
  */
 async function createPage(
   browser: Browser,
@@ -100,20 +108,21 @@ export async function captureAll(
     }
   }
 
-  // Process with concurrency pool
+  // Process with a concurrency pool. Each worker opens a fresh page per story
+  // rather than holding one for its whole queue: a frozen clock survives exactly
+  // one navigation, and a reused page silently screenshots blank from the second
+  // story onwards (see `createPage`). Opening a page costs a fraction of the
+  // per-story wait, and a blank baseline is invisible in CI -- it matches the next
+  // equally blank run -- so the trade is not close.
   const concurrency = Math.min(config.concurrency, work.length || 1);
   const fixedTime = resolveFixedTime(config.clock);
-  const pages = await Promise.all(
-    Array.from({ length: concurrency }, () =>
-      createPage(browser, config, fixedTime),
-    ),
-  );
 
   let cursor = 0;
 
-  async function processPage(page: Page) {
-    while (cursor < work.length) {
-      const item = work[cursor++]!;
+  async function captureStory(item: (typeof work)[number]): Promise<void> {
+    const page = await createPage(browser, config, fixedTime);
+
+    try {
       await page.setViewportSize({
         width: item.viewport.width,
         height: item.viewport.height,
@@ -143,14 +152,20 @@ export async function captureAll(
         buffer: Buffer.from(buffer),
         outputPath: item.outputPath,
       });
+    } finally {
+      await page.close();
     }
   }
 
-  await Promise.all(pages.map(processPage));
-
-  for (const page of pages) {
-    await page.close();
+  async function worker() {
+    while (cursor < work.length) {
+      await captureStory(work[cursor++]!);
+    }
   }
 
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+
+  // No pool to tear down: `captureStory` closes its own page in a `finally`, so a
+  // story that throws does not leak one either.
   return results;
 }

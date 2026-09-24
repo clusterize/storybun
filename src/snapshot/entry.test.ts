@@ -46,12 +46,26 @@ describe("generateSnapshotEntry", () => {
     );
   });
 
-  test("injects a fit-content width rule scoped to the marker", () => {
+  test("does not inject a width override on the story marker", () => {
+    // A story whose own layout genuinely fills its available width (e.g.
+    // width: 100%, a CSS grid) must capture full-width -- that's a deliberate
+    // choice, not a bug. A CSS width override on the marker (like the
+    // fit-content rule this replaces) would silently collapse such stories
+    // to their content's preferred width instead.
     const stories: StoryEntry[] = [
       { path: "a/b", filePath: "/tmp/a.stories.tsx", exports: ["Foo"], packageName: "test-pkg" },
     ];
     const code = generateSnapshotEntry(stories, testPackages(), testConfig(), "/tmp");
 
-    expect(code).toMatch(/\[data-storybun-story\]\s*\{\s*width:\s*fit-content;?\s*\}/);
+    expect(code).not.toMatch(/\[data-storybun-story\]\s*\{[^}]*width/);
   });
 });
+
+// Browser-driven coverage of renderStory's error branches lives in
+// capture.test.ts, which owns the single shared Chromium instance for this
+// package -- launching a second, separate browser instance from this file
+// intermittently crashes Chromium on this host (observed via `ps` sampling:
+// the second browser's process tree vanishes mid-run, well before close()
+// is even called), hanging captureAll's `browser.close()` afterAll for the
+// full hook timeout. Not a code bug; keeping all real-Chromium tests in one
+// file with one browser sidesteps it.

@@ -1,6 +1,11 @@
 import type { Browser, Page } from "playwright";
 import type { StoryEntry, ResolvedSnapshotConfig } from "../types.ts";
 
+// tsconfig has no "dom" lib; declare the globals the in-page callbacks below
+// touch rather than casting through `any` at every use.
+declare const window: any;
+declare const document: any;
+
 export interface CaptureResult {
   storyKey: string;
   viewport: { width: number; height: number; name?: string };
@@ -35,26 +40,58 @@ function resolveFixedTime(clock: string | null): Date | null {
   return time;
 }
 
-const MARKER_TIMEOUT_MS = 2_000;
+// By the time this runs, the caller has already awaited __STORYBUN_READY__
+// (captureAll does, and direct callers must too -- see capture.test.ts), and
+// readiness itself is only signalled after `document.fonts.ready` plus two
+// animation frames past the render/error branch in entry.ts. So the marker
+// (or the known-error state) should already be settled; this timeout is a
+// small safety margin for residual layout, not a real "wait for render".
+const MARKER_TIMEOUT_MS = 500;
 
 /**
- * Captures the story's own marker element, cropped to its own box. Error
- * paths in the generated entry (missing story, bad key, thrown render) leave
- * no marker in the DOM, so a missing or zero-sized marker falls back to a
- * full-page screenshot instead of hanging until the default Playwright
- * timeout and throwing.
+ * Captures the story's own marker element, cropped to its own box.
+ *
+ * Error paths in the generated entry (missing ?story=, bad key, story not
+ * found, export not found, thrown render) leave no marker in the DOM and
+ * instead set `document.body.dataset.storybunError`. That is the only case
+ * that legitimately falls back to a full-page screenshot -- and even then a
+ * warning is printed naming the story, so a degraded baseline can't pass
+ * unnoticed.
+ *
+ * Any other reason the marker fails to appear (e.g. a story that renders
+ * `null` and never settles) is NOT a known error state and is NOT swallowed:
+ * it's logged loudly and thrown, rather than silently producing a
+ * viewport-sized screenshot that could be accepted as a baseline. A genuine
+ * screenshot failure (marker or full page) is likewise never caught here.
  */
 export async function captureStoryOrPage(
   page: Page,
+  storyKey: string = "<unknown story>",
   timeoutMs: number = MARKER_TIMEOUT_MS,
 ): Promise<Buffer> {
   const marker = page.locator("[data-storybun-story]");
+
   try {
     await marker.waitFor({ state: "visible", timeout: timeoutMs });
-    return Buffer.from(await marker.screenshot({ type: "png" }));
-  } catch {
-    return Buffer.from(await page.screenshot({ type: "png" }));
+  } catch (waitErr) {
+    const isKnownErrorState = await page
+      .evaluate(() => document.body.dataset.storybunError === "true")
+      .catch(() => false);
+
+    if (isKnownErrorState) {
+      console.warn(
+        `[storybun] ${storyKey}: entry reported an error state (no story marker to capture) -- falling back to a full-page screenshot.`,
+      );
+      return Buffer.from(await page.screenshot({ type: "png" }));
+    }
+
+    console.error(
+      `[storybun] ${storyKey}: no story marker became visible within ${timeoutMs}ms and the entry did not report a known error state -- the story may be stuck rendering (e.g. returning null forever). Refusing to fall back to a full-page screenshot that could be mistaken for a valid baseline.`,
+    );
+    throw waitErr;
   }
+
+  return Buffer.from(await marker.screenshot({ type: "png" }));
 }
 
 /**
@@ -148,7 +185,7 @@ export async function captureAll(
 
       // Wait for the ready signal
       await page.waitForFunction(
-        () => (window as any).__STORYBUN_READY__ === true,
+        () => window.__STORYBUN_READY__ === true,
         { timeout: 30_000 },
       );
 
@@ -157,7 +194,7 @@ export async function captureAll(
         await page.waitForTimeout(config.waitTimeout);
       }
 
-      const buffer = await captureStoryOrPage(page);
+      const buffer = await captureStoryOrPage(page, storyKey);
 
       results.push({
         storyKey,

@@ -72,6 +72,18 @@ const stories: StoryEntry[] = [
     exports: ["Stack"],
     packageName: "test-pkg",
   },
+  {
+    path: "fixtures/percent",
+    filePath: join(fixturesDir, "percent.stories.tsx"),
+    exports: ["FullWidth"],
+    packageName: "test-pkg",
+  },
+  {
+    path: "fixtures/grid",
+    filePath: join(fixturesDir, "grid.stories.tsx"),
+    exports: ["TwoColumn"],
+    packageName: "test-pkg",
+  },
 ];
 
 function pngDimensions(buffer: Buffer): { width: number; height: number } {
@@ -134,21 +146,18 @@ describe("captureStoryOrPage (real chromium)", () => {
     }
   }
 
-  test("captures the story's own marker box, not a raw viewport screenshot", async () => {
+  test("captures the story's own rendered box, not the marker's container-filling box", async () => {
     const viewport = { width: 800, height: 600 };
     const buffer = await captureStory("fixtures/narrow--Badge", viewport);
     const { width, height } = pngDimensions(buffer);
 
-    // No CSS shrinks the marker to its content width (that decision was
-    // reverted -- a story that genuinely fills its available width now
-    // captures full-width, deliberately). This still isn't a raw
-    // `page.screenshot()` though: the marker's own box respects the page's
-    // default body margin (8px each side in Chromium), so it comes out 16px
-    // narrower than the viewport -- proof the marker, not the page, was
-    // captured.
-    expect(width).toBe(viewport.width - 16);
+    // The marker div itself always fills its container (it's a plain
+    // block-level div with no CSS) -- that's the bug this round fixes. The
+    // crop must instead follow the Badge's own fixed 120x40 box, nowhere
+    // near the 800-wide viewport it's rendered inside.
+    expect(width).toBe(120);
     expect(width).not.toBe(viewport.width);
-    expect(height).toBe(40); // Badge's own content height, unaffected
+    expect(height).toBe(40);
   }, 15_000);
 
   test("captures a story taller than the viewport at its full content height", async () => {
@@ -156,9 +165,39 @@ describe("captureStoryOrPage (real chromium)", () => {
     const buffer = await captureStory("fixtures/tall--Stack", viewport);
     const { width, height } = pngDimensions(buffer);
 
-    expect(width).toBe(viewport.width - 16);
+    expect(width).toBe(400); // Stack's own fixed width, not the container's
     expect(height).toBe(2000); // 20 rows * 100px -- not truncated to the viewport
     expect(height).not.toBe(viewport.height);
+  }, 15_000);
+
+  test("does not collapse a width: 100% story to its content size", async () => {
+    const viewport = { width: 800, height: 600 };
+    const buffer = await captureStory("fixtures/percent--FullWidth", viewport);
+    const { width, height } = pngDimensions(buffer);
+
+    // A `width: fit-content` on the marker (an earlier, reverted attempt at
+    // this fix) collapsed a story like this to single-digit pixels. It must
+    // instead come out laid out exactly as in production: the full width
+    // available to it (the 800px viewport minus Chromium's 8px-each-side
+    // default body margin).
+    expect(width).toBe(800 - 16);
+    expect(height).toBe(50);
+  }, 15_000);
+
+  test("does not collapse a grid-template-columns: 1fr 1fr story to a single column", async () => {
+    const viewport = { width: 800, height: 600 };
+    const buffer = await captureStory("fixtures/grid--TwoColumn", viewport);
+    const { width, height } = pngDimensions(buffer);
+
+    expect(width).toBe(800 - 16);
+    expect(height).toBe(50);
+
+    // Both columns must actually be present in the captured pixels, not
+    // just claimed by the reported width.
+    const quarterX = Math.floor(width / 4);
+    const threeQuarterX = width - quarterX;
+    expect(pixelAt(buffer, quarterX, 25)).toEqual([14, 165, 233, 255]); // left column, #0ea5e9
+    expect(pixelAt(buffer, threeQuarterX, 25)).toEqual([34, 197, 94, 255]); // right column, #22c55e
   }, 15_000);
 
   test("falls back to a full-page screenshot when no marker is present", async () => {
@@ -188,6 +227,23 @@ describe("captureStoryOrPage (real chromium)", () => {
       await page.close();
     }
   }, 10_000);
+
+  test("throws instead of silently falling back when the marker is visible but its content has no measurable box", async () => {
+    // The marker itself has an explicit box (so it passes the `visible`
+    // wait), but its only child collapses to zero size -- e.g. a story
+    // that renders `null` or an element with no layout box. This must hit
+    // the union-of-children measurement's own degenerate-rect check, not
+    // silently crop to a zero-size image or fall back to the viewport.
+    const page: Page = await browser.newPage();
+    try {
+      await page.setContent(
+        `<html><body><div data-storybun-story style="width:100px;height:100px;"><span style="display:inline-block;width:0;height:0;"></span></div></body></html>`,
+      );
+      await expect(captureStoryOrPage(page, "degenerate-story", 100)).rejects.toThrow();
+    } finally {
+      await page.close();
+    }
+  }, 10_000);
 });
 
 describe("captureAll (real call site)", () => {
@@ -209,7 +265,7 @@ describe("captureAll (real call site)", () => {
     return { ...testConfig().snapshot, ...overrides };
   }
 
-  test("captures the narrow fixture's own marker box through captureAll, not a raw viewport screenshot", async () => {
+  test("captures the narrow fixture's own rendered box through captureAll, not the marker's container-filling box", async () => {
     const viewport = { width: 800, height: 600 };
     const config = snapshotConfig({ viewports: [viewport], concurrency: 1 });
 
@@ -217,7 +273,7 @@ describe("captureAll (real call site)", () => {
 
     expect(results).toHaveLength(1);
     const { width, height } = pngDimensions(results[0]!.buffer);
-    expect(width).toBe(viewport.width - 16); // marker box, not fit to content -- see capture.ts's comment
+    expect(width).toBe(120); // Badge's own box, not the marker's -- see capture.ts's comment
     expect(width).not.toBe(viewport.width);
     expect(height).toBe(40);
   }, 20_000);
@@ -228,9 +284,14 @@ describe("captureAll (real call site)", () => {
 
     const results = await captureAll(browser, stories, config, serverUrl);
 
-    expect(results).toHaveLength(2);
+    expect(results).toHaveLength(4);
     const keys = results.map((r) => r.storyKey).sort();
-    expect(keys).toEqual(["fixtures/narrow--Badge", "fixtures/tall--Stack"]);
+    expect(keys).toEqual([
+      "fixtures/grid--TwoColumn",
+      "fixtures/narrow--Badge",
+      "fixtures/percent--FullWidth",
+      "fixtures/tall--Stack",
+    ]);
   }, 20_000);
 });
 

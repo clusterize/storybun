@@ -48,8 +48,63 @@ function resolveFixedTime(clock: string | null): Date | null {
 // small safety margin for residual layout, not a real "wait for render".
 const MARKER_TIMEOUT_MS = 500;
 
+interface StoryRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+// The marker div is block-level and always fills its container, so its own
+// box tells us nothing about the story's size. What we actually want is the
+// box the story itself occupies: the union of its rendered root(s) -- the
+// marker's direct element children (a story can render a fragment with more
+// than one root). Coordinates are made document-relative (adding the current
+// scroll offset) rather than viewport-relative, because the capture below
+// uses `fullPage: true` so content below the fold is included.
+//
+// Left/top are floored and right/bottom are ceiled rather than rounded to
+// the nearest pixel: `getBoundingClientRect()` returns fractional values,
+// and a plain round could clip a fraction of a pixel of real content on one
+// run and not another depending on which side of .5 it fell. Rounding
+// outward always fully contains the content and is deterministic run to
+// run, which matters because these images become diffed baselines.
+function measureStoryRect(): StoryRect | null {
+  const marker = document.querySelector("[data-storybun-story]");
+  if (!marker) return null;
+
+  const children = marker.children as ArrayLike<any>;
+  if (children.length === 0) return null;
+
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+
+  let left = Number.POSITIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+
+  for (let i = 0; i < children.length; i++) {
+    const rect = children[i]!.getBoundingClientRect();
+    const docLeft = rect.left + scrollX;
+    const docTop = rect.top + scrollY;
+    left = Math.min(left, docLeft);
+    top = Math.min(top, docTop);
+    right = Math.max(right, docLeft + rect.width);
+    bottom = Math.max(bottom, docTop + rect.height);
+  }
+
+  const x = Math.floor(left);
+  const y = Math.floor(top);
+  const width = Math.ceil(right) - x;
+  const height = Math.ceil(bottom) - y;
+
+  return { x, y, width, height };
+}
+
 /**
- * Captures the story's own marker element, cropped to its own box.
+ * Captures the story's own rendered box: the union of the bounding rects of
+ * the marker's element children, cropped out of a full-page screenshot.
  *
  * Error paths in the generated entry (missing ?story=, bad key, story not
  * found, export not found, thrown render) leave no marker in the DOM and
@@ -58,11 +113,13 @@ const MARKER_TIMEOUT_MS = 500;
  * warning is printed naming the story, so a degraded baseline can't pass
  * unnoticed.
  *
- * Any other reason the marker fails to appear (e.g. a story that renders
- * `null` and never settles) is NOT a known error state and is NOT swallowed:
+ * Any other reason the marker fails to appear or produce a measurable box
+ * (e.g. a story that renders `null` and never settles, or whose roots all
+ * collapse to zero size) is NOT a known error state and is NOT swallowed:
  * it's logged loudly and thrown, rather than silently producing a
- * viewport-sized screenshot that could be accepted as a baseline. A genuine
- * screenshot failure (marker or full page) is likewise never caught here.
+ * zero-size or viewport-sized screenshot that could be accepted as a
+ * baseline. A genuine screenshot failure (marker or full page) is likewise
+ * never caught here.
  */
 export async function captureStoryOrPage(
   page: Page,
@@ -91,7 +148,19 @@ export async function captureStoryOrPage(
     throw waitErr;
   }
 
-  return Buffer.from(await marker.screenshot({ type: "png" }));
+  const rect = await page.evaluate(measureStoryRect);
+  if (!rect || rect.width <= 0 || rect.height <= 0) {
+    console.error(
+      `[storybun] ${storyKey}: the story marker is visible but its rendered content has no measurable box (e.g. it rendered null, or all of its root elements collapsed to zero size) -- refusing to produce a zero-size or viewport-sized image.`,
+    );
+    throw new Error(
+      `${storyKey}: story marker has no measurable content to capture`,
+    );
+  }
+
+  return Buffer.from(
+    await page.screenshot({ type: "png", fullPage: true, clip: rect }),
+  );
 }
 
 /**

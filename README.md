@@ -83,6 +83,10 @@ against the baseline in `outDir`, writing `<story>.actual.png` and
 `<story>.diff.png` for anything that moved. `--update` accepts the current render
 as the new baseline.
 
+Each snapshot captures the story's own content, cropped to its own box — not
+the viewport and not the wrapper. The wrapper still renders around it (theme
+context, providers, stylesheets), it just isn't part of the captured pixels.
+
 ```ts
 export default {
   snapshot: {
@@ -92,7 +96,10 @@ export default {
     // Percentage of differing pixels tolerated (default: 0.1)
     threshold: 0.1,
 
-    // Viewports to capture each story at (default: one 1280x720 shot)
+    // Viewport sizes to render each story at before capture (default: one
+    // 1280x720 viewport). The captured image is cropped to the story's own
+    // content, not this size — a narrow or short story still produces a
+    // narrow or short PNG regardless of viewport.
     viewports: [{ width: 1280, height: 720 }],
 
     // Extra settle time in ms after the story signals ready (default: 0)

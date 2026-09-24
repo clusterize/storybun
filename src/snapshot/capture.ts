@@ -35,6 +35,28 @@ function resolveFixedTime(clock: string | null): Date | null {
   return time;
 }
 
+const MARKER_TIMEOUT_MS = 2_000;
+
+/**
+ * Captures the story's own marker element, cropped to its own box. Error
+ * paths in the generated entry (missing story, bad key, thrown render) leave
+ * no marker in the DOM, so a missing or zero-sized marker falls back to a
+ * full-page screenshot instead of hanging until the default Playwright
+ * timeout and throwing.
+ */
+export async function captureStoryOrPage(
+  page: Page,
+  timeoutMs: number = MARKER_TIMEOUT_MS,
+): Promise<Buffer> {
+  const marker = page.locator("[data-storybun-story]");
+  try {
+    await marker.waitFor({ state: "visible", timeout: timeoutMs });
+    return Buffer.from(await marker.screenshot({ type: "png" }));
+  } catch {
+    return Buffer.from(await page.screenshot({ type: "png" }));
+  }
+}
+
 /**
  * A page pinned to a deterministic environment. Timezone and locale are fixed so
  * a developer's machine renders what CI renders, and a fixed time freezes
@@ -135,12 +157,12 @@ export async function captureAll(
         await page.waitForTimeout(config.waitTimeout);
       }
 
-      const buffer = await page.screenshot({ type: "png" });
+      const buffer = await captureStoryOrPage(page);
 
       results.push({
         storyKey,
         viewport: item.viewport,
-        buffer: Buffer.from(buffer),
+        buffer,
         outputPath: item.outputPath,
       });
     }

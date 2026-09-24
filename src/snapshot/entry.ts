@@ -19,7 +19,7 @@ function resolveWrapper(
   return DEFAULT_WRAPPER;
 }
 
-function generateSnapshotEntry(
+export function generateSnapshotEntry(
   stories: StoryEntry[],
   packages: Map<string, PackageInfo>,
   config: ResolvedConfig,
@@ -75,7 +75,7 @@ const storyPackages: Record<string, string> = {
 ${storyPkgMap}
 };
 ${wrappersDecl}
-// Disable animations for stable snapshots
+// Disable animations for stable snapshots.
 const style = document.createElement("style");
 style.textContent = "* { animation-duration: 0s !important; transition-duration: 0s !important; }";
 document.head.appendChild(style);
@@ -85,6 +85,8 @@ async function renderStory() {
   const storyKey = params.get("story");
   if (!storyKey) {
     document.body.textContent = "Missing ?story= param";
+    document.body.dataset.storybunError = "true";
+    (window as any).__STORYBUN_READY__ = true;
     return;
   }
 
@@ -92,6 +94,8 @@ async function renderStory() {
   const sep = storyKey.lastIndexOf("--");
   if (sep === -1) {
     document.body.textContent = "Invalid story key: " + storyKey;
+    document.body.dataset.storybunError = "true";
+    (window as any).__STORYBUN_READY__ = true;
     return;
   }
 
@@ -101,6 +105,8 @@ async function renderStory() {
   const loader = modules[storyPath];
   if (!loader) {
     document.body.textContent = "Story not found: " + storyPath;
+    document.body.dataset.storybunError = "true";
+    (window as any).__STORYBUN_READY__ = true;
     return;
   }
 
@@ -108,6 +114,8 @@ async function renderStory() {
   const Story = mod[exportName];
   if (!Story) {
     document.body.textContent = "Export not found: " + exportName + " in " + storyPath;
+    document.body.dataset.storybunError = "true";
+    (window as any).__STORYBUN_READY__ = true;
     return;
   }
 
@@ -121,7 +129,11 @@ async function renderStory() {
 
   const root = createRoot(document.getElementById("root")!);
   root.render(
-    React.createElement(ActiveWrapper, null, React.createElement(Story))
+    React.createElement(
+      ActiveWrapper,
+      null,
+      React.createElement("div", { "data-storybun-story": "" }, React.createElement(Story))
+    )
   );
 
   // Signal readiness after paint
@@ -136,6 +148,7 @@ async function renderStory() {
 
 renderStory().catch((err) => {
   document.body.textContent = "Error: " + err.message;
+  document.body.dataset.storybunError = "true";
   (window as any).__STORYBUN_READY__ = true;
 });
 `;

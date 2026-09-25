@@ -138,14 +138,18 @@ function measureStoryRect(): StoryRect | null {
   }
   // A fixed-position descendant (a toast, a banner, a floating action) is
   // laid out against the viewport, so its ancestor's box says nothing about
-  // where it is; it is part of the story all the same.
+  // where it is; it is part of the story all the same. Its own descendants
+  // count with it: a toaster is a fixed list with no height of its own whose
+  // toasts are positioned absolutely inside it.
   const descendants = marker.querySelectorAll("*") as ArrayLike<any>;
   for (let i = 0; i < descendants.length; i++) {
     const el = descendants[i];
     if (window.getComputedStyle(el).position !== "fixed") continue;
-    const rect = el.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) continue;
     roots.push(el);
+    const inner = el.querySelectorAll("*") as ArrayLike<any>;
+    for (let j = 0; j < inner.length; j++) {
+      roots.push(inner[j]);
+    }
   }
   if (roots.length === 0) return null;
 

@@ -68,6 +68,26 @@ export const FixedBanner = () => (
   </div>
 );
 
+// A fixed list with no height of its own and an absolutely positioned item
+// inside it: the shape of a toaster. The item must still count.
+export const FixedContainer = () => (
+  <div style={{ width: 60, height: 30, background: "rgb(0, 0, 255)" }}>
+    <ol style={{ position: "fixed", left: 300, top: 200, width: 100, height: 0, margin: 0, padding: 0 }}>
+      <li
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          width: 100,
+          height: 50,
+          listStyle: "none",
+          background: "rgb(255, 0, 255)",
+        }}
+      />
+    </ol>
+  </div>
+);
+
 // Nothing inline at all, the shape of a dialog story: the capture is the
 // portaled content alone.
 export const PortalOnly = () =>

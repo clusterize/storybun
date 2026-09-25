@@ -357,22 +357,47 @@ html, body, #root {
 /* ---- Content Area ----
    No inheritable properties here — story content must be unstyled. */
 
+/* The content pane is the ONE scroll container for the story canvas. Any
+   wrapper -- the built-in one or a project's own -- sits inside it and only
+   has to be at least as tall as the pane (`min-height: 100%`, or a child
+   with `flex: 1`); the pane scrolls whatever overflows. With `overflow:
+   hidden` here, a story taller than the viewport was clipped at the bottom
+   and could not be scrolled at all when the project supplied its own Wrapper,
+   because nothing between the pane and the story was scrollable. */
 .storybun-content {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
   background: var(--sb-bg);
   animation: sb-fadeIn 0.3s ease;
 }
 
+/* A flex item shrinks to its `min-height` by default, and a project wrapper
+   declaring `min-height: 100%` would be shrunk to exactly the pane's height
+   with the story spilling out of it (its background stopping at the fold).
+   The pane grows its children instead and scrolls the result. */
+.storybun-content > * {
+  flex-shrink: 0;
+}
+
+/* Centers the story without trapping it: `align-items: center` on a flex
+   container pushes an overflowing child equally past the top and bottom
+   edges, and the part past the top edge can never be scrolled into view.
+   `margin: auto` on the child centers it only while it fits and resolves to
+   zero once it overflows, so a tall story starts at the top of the pane and
+   scrolls all the way down. */
 .storybun-wrapper {
-  flex: 1;
+  flex: 1 0 auto;
+  min-height: 100%;
   display: flex;
-  align-items: center;
-  justify-content: center;
   padding: 32px;
-  overflow: auto;
+}
+
+.storybun-story {
+  margin: auto;
+  max-width: 100%;
 }
 
 /* ---- Empty State ----

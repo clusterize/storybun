@@ -94,7 +94,8 @@ interface StoryRect {
 // box tells us nothing about the story's size. What we actually want is the
 // box the story itself occupies: the union of its rendered root(s) -- the
 // marker's direct element children (a story can render a fragment with more
-// than one root) -- plus whatever the story portaled out of the tree. A menu,
+// than one root) -- plus whatever the story portaled out of the tree or
+// pinned to the viewport with `position: fixed`. A menu,
 // popover, tooltip or dialog rendered open is mounted by its library as a
 // direct child of `document.body`, next to the app root rather than under
 // the marker, so measuring the marker's children alone would capture an open
@@ -122,13 +123,33 @@ function measureStoryRect(): StoryRect | null {
   for (let i = 0; i < children.length; i++) {
     roots.push(children[i]);
   }
+  // A portal container itself may have no box: some libraries mount an
+  // empty wrapper and position the popup absolutely inside it. Everything
+  // under such a container is story content, so its descendants count too.
   const bodyChildren = document.body.children as ArrayLike<any>;
   for (let i = 0; i < bodyChildren.length; i++) {
     const el = bodyChildren[i];
     if (el.contains(marker)) continue;
-    const rect = el.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) continue;
     roots.push(el);
+    const portaled = el.querySelectorAll("*") as ArrayLike<any>;
+    for (let j = 0; j < portaled.length; j++) {
+      roots.push(portaled[j]);
+    }
+  }
+  // A fixed-position descendant (a toast, a banner, a floating action) is
+  // laid out against the viewport, so its ancestor's box says nothing about
+  // where it is; it is part of the story all the same. Its own descendants
+  // count with it: a toaster is a fixed list with no height of its own whose
+  // toasts are positioned absolutely inside it.
+  const descendants = marker.querySelectorAll("*") as ArrayLike<any>;
+  for (let i = 0; i < descendants.length; i++) {
+    const el = descendants[i];
+    if (window.getComputedStyle(el).position !== "fixed") continue;
+    roots.push(el);
+    const inner = el.querySelectorAll("*") as ArrayLike<any>;
+    for (let j = 0; j < inner.length; j++) {
+      roots.push(inner[j]);
+    }
   }
   if (roots.length === 0) return null;
 
@@ -142,6 +163,7 @@ function measureStoryRect(): StoryRect | null {
 
   for (const el of roots) {
     const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) continue;
     const docLeft = rect.left + scrollX;
     const docTop = rect.top + scrollY;
     left = Math.min(left, docLeft);
@@ -149,6 +171,8 @@ function measureStoryRect(): StoryRect | null {
     right = Math.max(right, docLeft + rect.width);
     bottom = Math.max(bottom, docTop + rect.height);
   }
+
+  if (!Number.isFinite(left)) return null;
 
   const x = Math.floor(left);
   const y = Math.floor(top);

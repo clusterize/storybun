@@ -21,6 +21,7 @@ export type CompareStatus = "pass" | "fail" | "new";
 
 export interface CompareResult {
   storyKey: string;
+  mode?: string;
   status: CompareStatus;
   diffPercent: number;
   outputPath: string;
@@ -46,6 +47,7 @@ export async function compareAll(
       await removeIfExists(diffPath);
       results.push({
         storyKey: capture.storyKey,
+        mode: capture.mode,
         status: "new",
         diffPercent: 0,
         outputPath: capture.outputPath,
@@ -62,6 +64,7 @@ export async function compareAll(
       await Bun.write(actualPath, capture.buffer);
       results.push({
         storyKey: capture.storyKey,
+        mode: capture.mode,
         status: "fail",
         diffPercent: 100,
         outputPath: capture.outputPath,
@@ -88,6 +91,7 @@ export async function compareAll(
       await removeIfExists(diffPath);
       results.push({
         storyKey: capture.storyKey,
+        mode: capture.mode,
         status: "pass",
         diffPercent: 0,
         outputPath: capture.outputPath,
@@ -99,6 +103,7 @@ export async function compareAll(
 
       results.push({
         storyKey: capture.storyKey,
+        mode: capture.mode,
         status: "fail",
         diffPercent,
         outputPath: capture.outputPath,

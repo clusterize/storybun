@@ -19,6 +19,7 @@ function testConfig(): ResolvedConfig {
       clock: null,
       timezoneId: "UTC",
       locale: "en-US",
+      modes: {},
     },
   };
 }

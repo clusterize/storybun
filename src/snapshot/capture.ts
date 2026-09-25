@@ -1,5 +1,5 @@
 import type { Browser, Page } from "playwright";
-import type { StoryEntry, ResolvedSnapshotConfig } from "../types.ts";
+import type { StoryEntry, ResolvedSnapshotConfig, SnapshotMode } from "../types.ts";
 
 // tsconfig has no "dom" lib; declare the globals the in-page callbacks below
 // touch rather than casting through `any` at every use.
@@ -9,24 +9,47 @@ declare const document: any;
 export interface CaptureResult {
   storyKey: string;
   viewport: { width: number; height: number; name?: string };
+  /** Name of the snapshot mode this was captured in; unset when none are configured. */
+  mode?: string;
   buffer: Buffer;
   outputPath: string;
 }
 
+// The bare `<key>.png` name is kept for the single-viewport, no-modes case so
+// that enabling neither feature never renames a baseline. Each extra axis
+// appends its own suffix, viewport before mode, so a project that turns on
+// modes re-baselines exactly once (`X.png` -> `X-light.png`, `X-dark.png`).
 function storyOutputPath(
   outDir: string,
   storyPath: string,
   exportName: string,
   viewport: { width: number; height: number; name?: string },
   singleViewport: boolean,
+  modeName: string | undefined,
 ): string {
   const safePath = storyPath.replace(/\//g, "--");
-  const key = `${safePath}--${exportName}`;
-  if (singleViewport) {
-    return `${outDir}/${key}.png`;
+  let key = `${safePath}--${exportName}`;
+  if (!singleViewport) {
+    key += `-${viewport.name ?? `${viewport.width}x${viewport.height}`}`;
   }
-  const vpName = viewport.name ?? `${viewport.width}x${viewport.height}`;
-  return `${outDir}/${key}-${vpName}.png`;
+  if (modeName !== undefined) {
+    key += `-${modeName}`;
+  }
+  return `${outDir}/${key}.png`;
+}
+
+// A mode name becomes part of a filename and of the `<key>--<export>-<mode>`
+// suffix the report prints, so it must not contain a path separator or a
+// character that would make the baseline unparseable by the tooling that
+// reads the snapshot directory.
+function validateModeNames(modes: Record<string, SnapshotMode>): void {
+  for (const name of Object.keys(modes)) {
+    if (!/^[A-Za-z0-9_.]+$/.test(name)) {
+      throw new Error(
+        `Invalid snapshot mode name ${JSON.stringify(name)}: use letters, digits, "_" or "." only, since it becomes part of the baseline filename.`,
+      );
+    }
+  }
 }
 
 function resolveFixedTime(clock: string | null): Date | null {
@@ -183,10 +206,15 @@ async function createPage(
   browser: Browser,
   config: ResolvedSnapshotConfig,
   fixedTime: Date | null,
+  mode: SnapshotMode | undefined,
 ): Promise<Page> {
+  // `colorScheme` is left undefined when the mode does not set it: Playwright
+  // then reports `light`, the same as before modes existed, so a mode that
+  // only overrides the locale still renders the light theme.
   const page = await browser.newPage({
-    timezoneId: config.timezoneId,
-    locale: config.locale,
+    timezoneId: mode?.timezoneId ?? config.timezoneId,
+    locale: mode?.locale ?? config.locale,
+    colorScheme: mode?.colorScheme,
   });
   if (fixedTime) {
     await page.clock.setFixedTime(fixedTime);
@@ -204,11 +232,21 @@ export async function captureAll(
   const results: CaptureResult[] = [];
   const singleViewport = config.viewports.length === 1;
 
-  // Build work items: story × export × viewport
+  validateModeNames(config.modes);
+  // No configured modes still means one capture per story x viewport, in the
+  // browser's default environment and under the unsuffixed filename.
+  const modeEntries: [string | undefined, SnapshotMode | undefined][] =
+    Object.keys(config.modes).length === 0
+      ? [[undefined, undefined]]
+      : Object.entries(config.modes);
+
+  // Build work items: story × export × viewport × mode
   interface WorkItem {
     storyPath: string;
     exportName: string;
     viewport: { width: number; height: number; name?: string };
+    modeName: string | undefined;
+    mode: SnapshotMode | undefined;
     outputPath: string;
   }
   const work: WorkItem[] = [];
@@ -220,18 +258,23 @@ export async function captureAll(
         if (!key.includes(filter)) continue;
       }
       for (const viewport of config.viewports) {
-        work.push({
-          storyPath: story.path,
-          exportName,
-          viewport,
-          outputPath: storyOutputPath(
-            config.outDir,
-            story.path,
+        for (const [modeName, mode] of modeEntries) {
+          work.push({
+            storyPath: story.path,
             exportName,
             viewport,
-            singleViewport,
-          ),
-        });
+            modeName,
+            mode,
+            outputPath: storyOutputPath(
+              config.outDir,
+              story.path,
+              exportName,
+              viewport,
+              singleViewport,
+              modeName,
+            ),
+          });
+        }
       }
     }
   }
@@ -248,7 +291,7 @@ export async function captureAll(
   let cursor = 0;
 
   async function captureStory(item: (typeof work)[number]): Promise<void> {
-    const page = await createPage(browser, config, fixedTime);
+    const page = await createPage(browser, config, fixedTime, item.mode);
 
     try {
       await page.setViewportSize({
@@ -277,6 +320,7 @@ export async function captureAll(
       results.push({
         storyKey,
         viewport: item.viewport,
+        mode: item.modeName,
         buffer,
         outputPath: item.outputPath,
       });

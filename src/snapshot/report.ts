@@ -26,7 +26,8 @@ export function printReport(results: CompareResult[]): void {
   if (failed.length > 0) {
     console.log("\nChanged:");
     for (const r of failed) {
-      console.log(`  ${r.storyKey} (${r.diffPercent.toFixed(1)}% diff)`);
+      const label = r.mode ? `${r.storyKey} [${r.mode}]` : r.storyKey;
+      console.log(`  ${label} (${r.diffPercent.toFixed(1)}% diff)`);
     }
     console.log("\nRun with --update to accept changes.");
   }

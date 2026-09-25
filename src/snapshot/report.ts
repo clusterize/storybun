@@ -1,3 +1,4 @@
+import type { CaptureFailure } from "./capture.ts";
 import type { CompareResult } from "./compare.ts";
 
 export function printReport(results: CompareResult[]): void {
@@ -36,6 +37,15 @@ export function printReport(results: CompareResult[]): void {
     console.log("\nNew baselines saved.");
   }
 
+  console.log();
+}
+
+export function printFailures(failures: CaptureFailure[]): void {
+  console.log(`\u2717 ${failures.length} could not be captured:`);
+  for (const f of failures) {
+    const label = f.mode ? `${f.storyKey} [${f.mode}]` : f.storyKey;
+    console.log(`  ${label}: ${f.error.message.split("\n")[0]}`);
+  }
   console.log();
 }
 

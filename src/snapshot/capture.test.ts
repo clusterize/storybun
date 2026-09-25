@@ -87,6 +87,13 @@ const stories: StoryEntry[] = [
   },
 ];
 
+const emptyStory: StoryEntry = {
+  path: "fixtures/empty",
+  filePath: join(fixturesDir, "empty.stories.tsx"),
+  exports: ["Nothing"],
+  packageName: "test-pkg",
+};
+
 const schemeStory: StoryEntry = {
   path: "fixtures/scheme",
   filePath: join(fixturesDir, "scheme.stories.tsx"),
@@ -260,7 +267,7 @@ describe("captureAll (real call site)", () => {
 
   beforeAll(async () => {
     const build = await buildSnapshotEntry(
-      [...stories, schemeStory],
+      [...stories, schemeStory, emptyStory],
       testPackages(),
       testConfig(),
       cwd,
@@ -282,7 +289,7 @@ describe("captureAll (real call site)", () => {
     const viewport = { width: 800, height: 600 };
     const config = snapshotConfig({ viewports: [viewport], concurrency: 1 });
 
-    const results = await captureAll(browser, [stories[0]!], config, serverUrl);
+    const { captures: results } = await captureAll(browser, [stories[0]!], config, serverUrl);
 
     expect(results).toHaveLength(1);
     const { width, height } = pngDimensions(results[0]!.buffer);
@@ -295,7 +302,7 @@ describe("captureAll (real call site)", () => {
     const viewport = { width: 800, height: 600 };
     const config = snapshotConfig({ viewports: [viewport], concurrency: 2 });
 
-    const results = await captureAll(browser, stories, config, serverUrl);
+    const { captures: results } = await captureAll(browser, stories, config, serverUrl);
 
     expect(results).toHaveLength(4);
     const keys = results.map((r) => r.storyKey).sort();
@@ -307,10 +314,26 @@ describe("captureAll (real call site)", () => {
     ]);
   }, 20_000);
 
+  test("keeps capturing after a story that cannot be captured, and reports it", async () => {
+    const config = snapshotConfig({ viewports: [{ width: 800, height: 600 }], concurrency: 1 });
+
+    const { captures, failures } = await captureAll(
+      browser,
+      [emptyStory, stories[0]!],
+      config,
+      serverUrl,
+    );
+
+    expect(captures.map((c) => c.storyKey)).toEqual(["fixtures/narrow--Badge"]);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]!.storyKey).toBe("fixtures/empty--Nothing");
+    expect(failures[0]!.error).toBeInstanceOf(Error);
+  }, 30_000);
+
   test("without modes, a story is captured once under the unsuffixed filename in the light scheme", async () => {
     const config = snapshotConfig({ outDir: "/out", concurrency: 1 });
 
-    const results = await captureAll(browser, [schemeStory], config, serverUrl);
+    const { captures: results } = await captureAll(browser, [schemeStory], config, serverUrl);
 
     expect(results).toHaveLength(1);
     expect(results[0]!.mode).toBeUndefined();
@@ -325,7 +348,7 @@ describe("captureAll (real call site)", () => {
       modes: { light: { colorScheme: "light" }, dark: { colorScheme: "dark" } },
     });
 
-    const results = await captureAll(browser, [schemeStory], config, serverUrl);
+    const { captures: results } = await captureAll(browser, [schemeStory], config, serverUrl);
 
     expect(results).toHaveLength(2);
     const byMode = new Map(results.map((r) => [r.mode, r]));
@@ -349,7 +372,7 @@ describe("captureAll (real call site)", () => {
       modes: { dark: { colorScheme: "dark" } },
     });
 
-    const results = await captureAll(browser, [schemeStory], config, serverUrl);
+    const { captures: results } = await captureAll(browser, [schemeStory], config, serverUrl);
 
     expect(results.map((r) => r.outputPath).sort()).toEqual([
       "/out/fixtures--scheme--Swatch-400x600-dark.png",

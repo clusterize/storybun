@@ -6,6 +6,18 @@ import type { StoryEntry, ResolvedSnapshotConfig, SnapshotMode } from "../types.
 declare const window: any;
 declare const document: any;
 
+/** A story that could not be captured; the run goes on without it. */
+export interface CaptureFailure {
+  storyKey: string;
+  mode?: string;
+  error: Error;
+}
+
+export interface CaptureOutcome {
+  captures: CaptureResult[];
+  failures: CaptureFailure[];
+}
+
 export interface CaptureResult {
   storyKey: string;
   viewport: { width: number; height: number; name?: string };
@@ -292,8 +304,9 @@ export async function captureAll(
   config: ResolvedSnapshotConfig,
   serverUrl: string,
   filter?: string,
-): Promise<CaptureResult[]> {
+): Promise<CaptureOutcome> {
   const results: CaptureResult[] = [];
+  const failures: CaptureFailure[] = [];
   const singleViewport = config.viewports.length === 1;
 
   validateModeNames(config.modes);
@@ -354,7 +367,13 @@ export async function captureAll(
 
   let cursor = 0;
 
+  // One story that cannot be captured must not take the other hundred with
+  // it: a run that aborts on the first failure reports one problem per CI
+  // round trip and writes no comparison for the stories that did render. The
+  // failure is kept, with its story key, and the run goes on; the caller
+  // reports every failure together and fails the run on any.
   async function captureStory(item: (typeof work)[number]): Promise<void> {
+    const storyKey = `${item.storyPath}--${item.exportName}`;
     const page = await createPage(browser, config, fixedTime, item.mode);
 
     try {
@@ -363,7 +382,6 @@ export async function captureAll(
         height: item.viewport.height,
       });
 
-      const storyKey = `${item.storyPath}--${item.exportName}`;
       await renderStory(page, serverUrl, storyKey, config);
 
       const buffer = await captureStoryOrPage(page, storyKey);
@@ -374,6 +392,12 @@ export async function captureAll(
         mode: item.modeName,
         buffer,
         outputPath: item.outputPath,
+      });
+    } catch (err) {
+      failures.push({
+        storyKey,
+        mode: item.modeName,
+        error: err instanceof Error ? err : new Error(String(err)),
       });
     } finally {
       await page.close();
@@ -390,5 +414,5 @@ export async function captureAll(
 
   // No pool to tear down: `captureStory` closes its own page in a `finally`, so a
   // story that throws does not leak one either.
-  return results;
+  return { captures: results, failures };
 }

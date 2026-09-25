@@ -92,6 +92,11 @@ against the baseline in `outDir`, writing `<story>.actual.png` and
 `<story>.diff.png` for anything that moved. `--update` accepts the current render
 as the new baseline.
 
+Each image is cropped to the story's own box: what the story rendered, plus
+anything it portaled next to the app root, so a menu, popover or dialog rendered
+open is captured together with its trigger. The wrapper's own chrome around the
+story stays out of the picture.
+
 Each snapshot captures the story's own content, cropped to its own box — not
 the viewport and not the wrapper. The wrapper still renders around it (theme
 context, providers, stylesheets), it just isn't part of the captured pixels.

@@ -82,9 +82,16 @@ interface StoryRect {
 // box tells us nothing about the story's size. What we actually want is the
 // box the story itself occupies: the union of its rendered root(s) -- the
 // marker's direct element children (a story can render a fragment with more
-// than one root). Coordinates are made document-relative (adding the current
-// scroll offset) rather than viewport-relative, because the capture below
-// uses `fullPage: true` so content below the fold is included.
+// than one root) -- plus whatever the story portaled out of the tree. A menu,
+// popover, tooltip or dialog rendered open is mounted by its library as a
+// direct child of `document.body`, next to the app root rather than under
+// the marker, so measuring the marker's children alone would capture an open
+// dropdown as nothing but its trigger. Every body child that does not contain
+// the marker and has a box is therefore part of the story: the only other
+// things at that level are the app root and script/style tags, which have no
+// box. Coordinates are made document-relative (adding the current scroll
+// offset) rather than viewport-relative, because the capture below uses
+// `fullPage: true` so content below the fold is included.
 //
 // Left/top are floored and right/bottom are ceiled rather than rounded to
 // the nearest pixel: `getBoundingClientRect()` returns fractional values,
@@ -96,8 +103,22 @@ function measureStoryRect(): StoryRect | null {
   const marker = document.querySelector("[data-storybun-story]");
   if (!marker) return null;
 
+  // A story may render nothing inline at all -- a dialog story is only its
+  // portal -- so an empty marker is not yet a failure; no roots anywhere is.
   const children = marker.children as ArrayLike<any>;
-  if (children.length === 0) return null;
+  const roots: any[] = [];
+  for (let i = 0; i < children.length; i++) {
+    roots.push(children[i]);
+  }
+  const bodyChildren = document.body.children as ArrayLike<any>;
+  for (let i = 0; i < bodyChildren.length; i++) {
+    const el = bodyChildren[i];
+    if (el.contains(marker)) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) continue;
+    roots.push(el);
+  }
+  if (roots.length === 0) return null;
 
   const scrollX = window.scrollX;
   const scrollY = window.scrollY;
@@ -107,8 +128,8 @@ function measureStoryRect(): StoryRect | null {
   let right = Number.NEGATIVE_INFINITY;
   let bottom = Number.NEGATIVE_INFINITY;
 
-  for (let i = 0; i < children.length; i++) {
-    const rect = children[i]!.getBoundingClientRect();
+  for (const el of roots) {
+    const rect = el.getBoundingClientRect();
     const docLeft = rect.left + scrollX;
     const docTop = rect.top + scrollY;
     left = Math.min(left, docLeft);
@@ -127,7 +148,8 @@ function measureStoryRect(): StoryRect | null {
 
 /**
  * Captures the story's own rendered box: the union of the bounding rects of
- * the marker's element children, cropped out of a full-page screenshot.
+ * the marker's element children and of anything the story portaled next to
+ * the app root, cropped out of a full-page screenshot.
  *
  * Error paths in the generated entry (missing ?story=, bad key, story not
  * found, export not found, thrown render) leave no marker in the DOM and
@@ -151,8 +173,11 @@ export async function captureStoryOrPage(
 ): Promise<Buffer> {
   const marker = page.locator("[data-storybun-story]");
 
+  // `attached`, not `visible`: a story that only portals (a dialog) leaves
+  // the marker itself with no box. Whether there is anything to capture is
+  // decided by the measurement below, which also covers the portaled roots.
   try {
-    await marker.waitFor({ state: "visible", timeout: timeoutMs });
+    await marker.waitFor({ state: "attached", timeout: timeoutMs });
   } catch (waitErr) {
     const isKnownErrorState = await page
       .evaluate(() => document.body.dataset.storybunError === "true")
@@ -166,7 +191,7 @@ export async function captureStoryOrPage(
     }
 
     console.error(
-      `[storybun] ${storyKey}: no story marker became visible within ${timeoutMs}ms and the entry did not report a known error state -- the story may be stuck rendering (e.g. returning null forever). Refusing to fall back to a full-page screenshot that could be mistaken for a valid baseline.`,
+      `[storybun] ${storyKey}: no story marker appeared within ${timeoutMs}ms and the entry did not report a known error state -- the story may be stuck rendering. Refusing to fall back to a full-page screenshot that could be mistaken for a valid baseline.`,
     );
     throw waitErr;
   }
@@ -174,7 +199,7 @@ export async function captureStoryOrPage(
   const rect = await page.evaluate(measureStoryRect);
   if (!rect || rect.width <= 0 || rect.height <= 0) {
     console.error(
-      `[storybun] ${storyKey}: the story marker is visible but its rendered content has no measurable box (e.g. it rendered null, or all of its root elements collapsed to zero size) -- refusing to produce a zero-size or viewport-sized image.`,
+      `[storybun] ${storyKey}: the story rendered nothing with a measurable box, inline or portaled (e.g. it rendered null, or all of its root elements collapsed to zero size) -- refusing to produce a zero-size or viewport-sized image.`,
     );
     throw new Error(
       `${storyKey}: story marker has no measurable content to capture`,

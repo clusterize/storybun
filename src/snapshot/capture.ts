@@ -123,13 +123,18 @@ function measureStoryRect(): StoryRect | null {
   for (let i = 0; i < children.length; i++) {
     roots.push(children[i]);
   }
+  // A portal container itself may have no box: some libraries mount an
+  // empty wrapper and position the popup absolutely inside it. Everything
+  // under such a container is story content, so its descendants count too.
   const bodyChildren = document.body.children as ArrayLike<any>;
   for (let i = 0; i < bodyChildren.length; i++) {
     const el = bodyChildren[i];
     if (el.contains(marker)) continue;
-    const rect = el.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) continue;
     roots.push(el);
+    const portaled = el.querySelectorAll("*") as ArrayLike<any>;
+    for (let j = 0; j < portaled.length; j++) {
+      roots.push(portaled[j]);
+    }
   }
   // A fixed-position descendant (a toast, a banner, a floating action) is
   // laid out against the viewport, so its ancestor's box says nothing about
@@ -154,6 +159,7 @@ function measureStoryRect(): StoryRect | null {
 
   for (const el of roots) {
     const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) continue;
     const docLeft = rect.left + scrollX;
     const docTop = rect.top + scrollY;
     left = Math.min(left, docLeft);
@@ -161,6 +167,8 @@ function measureStoryRect(): StoryRect | null {
     right = Math.max(right, docLeft + rect.width);
     bottom = Math.max(bottom, docTop + rect.height);
   }
+
+  if (!Number.isFinite(left)) return null;
 
   const x = Math.floor(left);
   const y = Math.floor(top);

@@ -28,6 +28,29 @@ export const OpenMenu = () => (
   </>
 );
 
+// A portal whose container has no box of its own, with the popup positioned
+// absolutely inside it: the shape Base UI mounts. The popup must still count.
+export const NestedPortal = () => (
+  <>
+    <div style={{ width: 60, height: 30, background: "rgb(0, 0, 255)" }} />
+    {createPortal(
+      <div>
+        <div
+          style={{
+            position: "absolute",
+            left: 300,
+            top: 200,
+            width: 100,
+            height: 50,
+            background: "rgb(255, 0, 255)",
+          }}
+        />
+      </div>,
+      document.body,
+    )}
+  </>
+);
+
 // A fixed-position element inside the story tree (a toast, a banner): its
 // ancestors' boxes do not include it, so it must be measured on its own.
 export const FixedBanner = () => (

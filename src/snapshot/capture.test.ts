@@ -97,7 +97,7 @@ const emptyStory: StoryEntry = {
 const portalStory: StoryEntry = {
   path: "fixtures/portal",
   filePath: join(fixturesDir, "portal.stories.tsx"),
-  exports: ["OpenMenu", "PortalOnly", "EmptyPortal", "FixedBanner"],
+  exports: ["OpenMenu", "PortalOnly", "EmptyPortal", "FixedBanner", "NestedPortal"],
   packageName: "test-pkg",
 };
 
@@ -357,6 +357,19 @@ describe("captureAll (real call site)", () => {
     expect(height).toBe(250 - 8);
     expect(pixelAt(buffer, 30, 15)).toEqual([0, 0, 255, 255]); // the trigger
     expect(pixelAt(buffer, 300 - 8 + 50, 200 - 8 + 25)).toEqual([255, 0, 255, 255]); // the portaled box
+  }, 20_000);
+
+  test("includes a popup positioned inside a portal container that has no box itself", async () => {
+    const config = snapshotConfig({ viewports: [{ width: 800, height: 600 }], concurrency: 1 });
+
+    const { captures } = await captureAll(browser, [portalStory], config, serverUrl, "NestedPortal");
+
+    expect(captures).toHaveLength(1);
+    const buffer = captures[0]!.buffer;
+    const { width, height } = pngDimensions(buffer);
+    expect(width).toBe(400 - 8);
+    expect(height).toBe(250 - 8);
+    expect(pixelAt(buffer, 300 - 8 + 50, 200 - 8 + 25)).toEqual([255, 0, 255, 255]);
   }, 20_000);
 
   test("includes a fixed-position descendant of the story, as a toast is", async () => {

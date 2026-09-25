@@ -11,6 +11,7 @@ const snapshotDefaults: ResolvedSnapshotConfig = {
   clock: null,
   timezoneId: "UTC",
   locale: "en-US",
+  modes: {},
 };
 
 const defaults: ResolvedConfig = {

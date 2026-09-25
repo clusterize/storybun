@@ -5,6 +5,21 @@ export interface StoryMeta {
   exports: string[];
 }
 
+/**
+ * One environment a story is captured in, on top of the viewport. A mode
+ * changes what the browser reports to the page, never what the story
+ * renders on its own: it is how a theme that follows `prefers-color-scheme`
+ * gets a dark baseline next to its light one without a story per theme.
+ */
+export interface SnapshotMode {
+  /** Emulated `prefers-color-scheme` for the page. */
+  colorScheme?: "light" | "dark" | "no-preference";
+  /** Overrides the snapshot-level `locale` for this mode. */
+  locale?: string;
+  /** Overrides the snapshot-level `timezoneId` for this mode. */
+  timezoneId?: string;
+}
+
 export interface SnapshotConfig {
   outDir?: string;
   threshold?: number;
@@ -23,6 +38,14 @@ export interface SnapshotConfig {
   timezoneId?: string;
   /** Locale for the page, driving `Intl` output (default: "en-US"). */
   locale?: string;
+  /**
+   * Named environments every story is captured in, e.g.
+   * `{ light: { colorScheme: "light" }, dark: { colorScheme: "dark" } }`.
+   * Each story x viewport is captured once per mode, and the mode name is
+   * appended to the baseline filename. Unset captures each story once, with
+   * no suffix.
+   */
+  modes?: Record<string, SnapshotMode>;
 }
 
 export interface StorybunConfig {
@@ -48,6 +71,7 @@ export interface ResolvedSnapshotConfig {
   clock: string | null;
   timezoneId: string;
   locale: string;
+  modes: Record<string, SnapshotMode>;
 }
 
 export interface ResolvedConfig {

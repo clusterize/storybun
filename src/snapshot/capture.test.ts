@@ -45,6 +45,7 @@ function testConfig(): ResolvedConfig {
       clock: null,
       timezoneId: "UTC",
       locale: "en-US",
+      modes: {},
     },
   };
 }
@@ -85,6 +86,13 @@ const stories: StoryEntry[] = [
     packageName: "test-pkg",
   },
 ];
+
+const schemeStory: StoryEntry = {
+  path: "fixtures/scheme",
+  filePath: join(fixturesDir, "scheme.stories.tsx"),
+  exports: ["Swatch"],
+  packageName: "test-pkg",
+};
 
 function pngDimensions(buffer: Buffer): { width: number; height: number } {
   const png = PNG.sync.read(buffer);
@@ -251,7 +259,12 @@ describe("captureAll (real call site)", () => {
   let stopServer: () => void;
 
   beforeAll(async () => {
-    const build = await buildSnapshotEntry(stories, testPackages(), testConfig(), cwd);
+    const build = await buildSnapshotEntry(
+      [...stories, schemeStory],
+      testPackages(),
+      testConfig(),
+      cwd,
+    );
     const server = startSnapshotServer(build);
     serverUrl = `http://localhost:${server.port}`;
     stopServer = () => server.stop();
@@ -292,6 +305,64 @@ describe("captureAll (real call site)", () => {
       "fixtures/percent--FullWidth",
       "fixtures/tall--Stack",
     ]);
+  }, 20_000);
+
+  test("without modes, a story is captured once under the unsuffixed filename in the light scheme", async () => {
+    const config = snapshotConfig({ outDir: "/out", concurrency: 1 });
+
+    const results = await captureAll(browser, [schemeStory], config, serverUrl);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]!.mode).toBeUndefined();
+    expect(results[0]!.outputPath).toBe("/out/fixtures--scheme--Swatch.png");
+    expect(pixelAt(results[0]!.buffer, 50, 30)).toEqual([255, 0, 0, 255]);
+  }, 20_000);
+
+  test("captures a story once per mode, with the emulated color scheme and a mode suffix", async () => {
+    const config = snapshotConfig({
+      outDir: "/out",
+      concurrency: 2,
+      modes: { light: { colorScheme: "light" }, dark: { colorScheme: "dark" } },
+    });
+
+    const results = await captureAll(browser, [schemeStory], config, serverUrl);
+
+    expect(results).toHaveLength(2);
+    const byMode = new Map(results.map((r) => [r.mode, r]));
+    expect([...byMode.keys()].sort()).toEqual(["dark", "light"]);
+
+    expect(byMode.get("light")!.outputPath).toBe("/out/fixtures--scheme--Swatch-light.png");
+    expect(pixelAt(byMode.get("light")!.buffer, 50, 30)).toEqual([255, 0, 0, 255]);
+
+    expect(byMode.get("dark")!.outputPath).toBe("/out/fixtures--scheme--Swatch-dark.png");
+    expect(pixelAt(byMode.get("dark")!.buffer, 50, 30)).toEqual([0, 255, 0, 255]);
+  }, 20_000);
+
+  test("puts the viewport suffix before the mode suffix when both axes are configured", async () => {
+    const config = snapshotConfig({
+      outDir: "/out",
+      concurrency: 1,
+      viewports: [
+        { width: 800, height: 600, name: "desktop" },
+        { width: 400, height: 600 },
+      ],
+      modes: { dark: { colorScheme: "dark" } },
+    });
+
+    const results = await captureAll(browser, [schemeStory], config, serverUrl);
+
+    expect(results.map((r) => r.outputPath).sort()).toEqual([
+      "/out/fixtures--scheme--Swatch-400x600-dark.png",
+      "/out/fixtures--scheme--Swatch-desktop-dark.png",
+    ]);
+  }, 20_000);
+
+  test("rejects a mode name that cannot be part of a baseline filename", async () => {
+    const config = snapshotConfig({ modes: { "dark/blue": { colorScheme: "dark" } } });
+
+    await expect(captureAll(browser, [schemeStory], config, serverUrl)).rejects.toThrow(
+      /Invalid snapshot mode name/,
+    );
   }, 20_000);
 });
 

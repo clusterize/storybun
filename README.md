@@ -116,9 +116,28 @@ export default {
     // Page timezone and locale, fixed so local runs match CI
     timezoneId: "UTC",
     locale: "en-US",
+
+    // Environments every story is captured in, on top of `viewports`. Each
+    // story is captured once per mode and the mode name is appended to the
+    // baseline filename (`Button--Primary-dark.png`). Unset captures each
+    // story once, unsuffixed.
+    modes: {
+      light: { colorScheme: "light" },
+      dark: { colorScheme: "dark" },
+    },
   },
 } satisfies StorybunConfig;
 ```
+
+A mode changes what the browser reports to the page -- `prefers-color-scheme`,
+and optionally a `locale` or `timezoneId` override -- never what a story renders
+on its own. It is meant for a theme that follows the OS preference: with the two
+modes above every story gets a light and a dark baseline without a story per
+theme. A theme read from storage instead of the media query does not react to a
+mode, and needs a Wrapper that maps the mode onto it.
+
+Turning modes on renames every baseline once (`X.png` becomes `X-light.png` and
+`X-dark.png`); the unsuffixed files are left in place and can be deleted.
 
 Timers keep running under `clock` — only the reported time is frozen — so a
 component polling on an interval simply re-renders the same output. Story

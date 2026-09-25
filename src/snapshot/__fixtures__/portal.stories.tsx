@@ -28,6 +28,23 @@ export const OpenMenu = () => (
   </>
 );
 
+// A fixed-position element inside the story tree (a toast, a banner): its
+// ancestors' boxes do not include it, so it must be measured on its own.
+export const FixedBanner = () => (
+  <div style={{ width: 60, height: 30, background: "rgb(0, 0, 255)" }}>
+    <div
+      style={{
+        position: "fixed",
+        left: 300,
+        top: 200,
+        width: 100,
+        height: 50,
+        background: "rgb(255, 0, 255)",
+      }}
+    />
+  </div>
+);
+
 // Nothing inline at all, the shape of a dialog story: the capture is the
 // portaled content alone.
 export const PortalOnly = () =>

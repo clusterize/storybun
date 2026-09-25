@@ -103,9 +103,9 @@ function measureStoryRect(): StoryRect | null {
   const marker = document.querySelector("[data-storybun-story]");
   if (!marker) return null;
 
+  // A story may render nothing inline at all -- a dialog story is only its
+  // portal -- so an empty marker is not yet a failure; no roots anywhere is.
   const children = marker.children as ArrayLike<any>;
-  if (children.length === 0) return null;
-
   const roots: any[] = [];
   for (let i = 0; i < children.length; i++) {
     roots.push(children[i]);
@@ -118,6 +118,7 @@ function measureStoryRect(): StoryRect | null {
     if (rect.width <= 0 || rect.height <= 0) continue;
     roots.push(el);
   }
+  if (roots.length === 0) return null;
 
   const scrollX = window.scrollX;
   const scrollY = window.scrollY;
@@ -172,8 +173,11 @@ export async function captureStoryOrPage(
 ): Promise<Buffer> {
   const marker = page.locator("[data-storybun-story]");
 
+  // `attached`, not `visible`: a story that only portals (a dialog) leaves
+  // the marker itself with no box. Whether there is anything to capture is
+  // decided by the measurement below, which also covers the portaled roots.
   try {
-    await marker.waitFor({ state: "visible", timeout: timeoutMs });
+    await marker.waitFor({ state: "attached", timeout: timeoutMs });
   } catch (waitErr) {
     const isKnownErrorState = await page
       .evaluate(() => document.body.dataset.storybunError === "true")
@@ -187,7 +191,7 @@ export async function captureStoryOrPage(
     }
 
     console.error(
-      `[storybun] ${storyKey}: no story marker became visible within ${timeoutMs}ms and the entry did not report a known error state -- the story may be stuck rendering (e.g. returning null forever). Refusing to fall back to a full-page screenshot that could be mistaken for a valid baseline.`,
+      `[storybun] ${storyKey}: no story marker appeared within ${timeoutMs}ms and the entry did not report a known error state -- the story may be stuck rendering. Refusing to fall back to a full-page screenshot that could be mistaken for a valid baseline.`,
     );
     throw waitErr;
   }
@@ -195,7 +199,7 @@ export async function captureStoryOrPage(
   const rect = await page.evaluate(measureStoryRect);
   if (!rect || rect.width <= 0 || rect.height <= 0) {
     console.error(
-      `[storybun] ${storyKey}: the story marker is visible but its rendered content has no measurable box (e.g. it rendered null, or all of its root elements collapsed to zero size) -- refusing to produce a zero-size or viewport-sized image.`,
+      `[storybun] ${storyKey}: the story rendered nothing with a measurable box, inline or portaled (e.g. it rendered null, or all of its root elements collapsed to zero size) -- refusing to produce a zero-size or viewport-sized image.`,
     );
     throw new Error(
       `${storyKey}: story marker has no measurable content to capture`,

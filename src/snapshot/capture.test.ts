@@ -90,7 +90,7 @@ const stories: StoryEntry[] = [
 const portalStory: StoryEntry = {
   path: "fixtures/portal",
   filePath: join(fixturesDir, "portal.stories.tsx"),
-  exports: ["OpenMenu", "EmptyPortal"],
+  exports: ["OpenMenu", "PortalOnly", "EmptyPortal"],
   packageName: "test-pkg",
 };
 
@@ -226,7 +226,7 @@ describe("captureStoryOrPage (real chromium)", () => {
     expect(height).toBe(viewport.height);
   }, 15_000);
 
-  test("throws instead of silently falling back when the marker never becomes visible and no known error state was reported", async () => {
+  test("throws instead of silently falling back when the marker has no box and nothing was portaled", async () => {
     // A hand-built page, not routed through entry.ts: the marker exists but
     // is hidden, and nothing sets document.body.dataset.storybunError -- the
     // exact shape of a story that renders but never becomes visible (e.g.
@@ -328,6 +328,19 @@ describe("captureAll (real call site)", () => {
     expect(height).toBe(250 - 8);
     expect(pixelAt(buffer, 30, 15)).toEqual([0, 0, 255, 255]); // the trigger
     expect(pixelAt(buffer, 300 - 8 + 50, 200 - 8 + 25)).toEqual([255, 0, 255, 255]); // the portaled box
+  }, 20_000);
+
+  test("captures a story that renders only a portal, as a dialog story does", async () => {
+    const config = snapshotConfig({ viewports: [{ width: 800, height: 600 }], concurrency: 1 });
+
+    const results = await captureAll(browser, [portalStory], config, serverUrl, "PortalOnly");
+
+    expect(results).toHaveLength(1);
+    const buffer = results[0]!.buffer;
+    const { width, height } = pngDimensions(buffer);
+    expect(width).toBe(100);
+    expect(height).toBe(50);
+    expect(pixelAt(buffer, 50, 25)).toEqual([255, 0, 255, 255]);
   }, 20_000);
 
   test("ignores a portaled element with no box", async () => {

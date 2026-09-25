@@ -28,6 +28,23 @@ export const OpenMenu = () => (
   </>
 );
 
+// Nothing inline at all, the shape of a dialog story: the capture is the
+// portaled content alone.
+export const PortalOnly = () =>
+  createPortal(
+    <div
+      style={{
+        position: "fixed",
+        left: 300,
+        top: 200,
+        width: 100,
+        height: 50,
+        background: "rgb(255, 0, 255)",
+      }}
+    />,
+    document.body,
+  );
+
 // A portal that mounts nothing visible (a closed overlay's empty container)
 // must not widen the capture beyond the story's own box.
 export const EmptyPortal = () => (

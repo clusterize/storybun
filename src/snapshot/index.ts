@@ -9,17 +9,36 @@ import { compareAll, updateBaselines } from "./compare.ts";
 import { printReport, printUpdateReport, printFailures, getExitCode } from "./report.ts";
 import { updateCodeowners } from "./codeowners.ts";
 import { loadPlaywright } from "./playwright.ts";
+import { buildReport, findRemovedBaselines } from "./report-model.ts";
+import { loadReportTemplate } from "./report-html.tsx";
+import { resolveReportPath, writeHtmlReport, writeJsonReport } from "./report-files.ts";
+import { formatDuration, formatPlan, formatProgress } from "./progress.ts";
 
 interface SnapshotOptions {
   update: boolean;
   filter?: string;
   codeowners: boolean;
+  /** `--json [path]`: true for the default `<outDir>/report.json`. */
+  json?: string | true;
+  /** `--html [path]`: true for the default `<outDir>/report.html`. */
+  html?: string | true;
+  /** `--quiet`: no per-capture progress lines, only phases and the summary. */
+  quiet?: boolean;
+}
+
+/** Logs `<label> in <duration>` once the awaited work is done. */
+async function timed<T>(label: string, work: () => Promise<T>): Promise<T> {
+  const startedAt = performance.now();
+  const result = await work();
+  console.log(`${label} in ${formatDuration(performance.now() - startedAt)}`);
+  return result;
 }
 
 export async function runSnapshots(
   cwd: string,
   options: SnapshotOptions,
 ): Promise<number> {
+  const runStartedAt = performance.now();
   const playwright = await loadPlaywright();
   if (!playwright) return 2;
 
@@ -33,17 +52,19 @@ export async function runSnapshots(
   // Resolve outDir in snapshot config to absolute path for capture
   const resolvedSnapshotConfig = { ...snapshotConfig, outDir };
 
-  console.log("Scanning stories...");
-  const { stories, packages } = await scanStories(config, cwd);
-  console.log(`Found ${stories.length} story file(s)`);
+  const { stories, packages } = await timed("Scanned stories", () => scanStories(config, cwd));
+  console.log(
+    `Found ${stories.length} story file(s) in ${packages.size} package(s), baselines in ${snapshotConfig.outDir}`,
+  );
 
   if (stories.length === 0) {
     console.log("No stories found.");
     return 0;
   }
 
-  console.log("Building snapshot entry...");
-  const buildResult = await buildSnapshotEntry(stories, packages, config, cwd);
+  const buildResult = await timed("Built snapshot entry", () =>
+    buildSnapshotEntry(stories, packages, config, cwd),
+  );
 
   const server = startSnapshotServer(buildResult);
   const serverUrl = `http://localhost:${server.port}`;
@@ -52,17 +73,30 @@ export async function runSnapshots(
   let exitCode = 0;
 
   try {
-    console.log("Launching browser...");
-    const browser = await playwright.chromium.launch();
+    const browser = await timed("Launched browser", () => playwright.chromium.launch());
 
     try {
-      console.log("Capturing snapshots...");
-      const { captures, failures } = await captureAll(
-        browser,
-        stories,
-        resolvedSnapshotConfig,
-        serverUrl,
-        options.filter,
+      const singleViewport = snapshotConfig.viewports.length === 1;
+      const exportCount = stories.reduce((n, s) => n + s.exports.length, 0);
+      const { captures, failures } = await timed("Captured", () =>
+        captureAll(browser, stories, resolvedSnapshotConfig, serverUrl, options.filter, {
+          onStart: (total) => {
+            console.log(
+              formatPlan(
+                stories.length,
+                exportCount,
+                snapshotConfig.viewports.length,
+                Object.keys(snapshotConfig.modes).length,
+                total,
+                Math.min(snapshotConfig.concurrency, total || 1),
+              ) + (options.filter ? ` (filter: ${options.filter})` : ""),
+            );
+          },
+          onProgress: (event) => {
+            // A failure is always worth a line; the rest only when asked.
+            if (!options.quiet || event.error) console.log(formatProgress(event, singleViewport));
+          },
+        }),
       );
 
       if (captures.length === 0 && failures.length === 0) {
@@ -70,14 +104,17 @@ export async function runSnapshots(
         return 0;
       }
 
+      let compared: Awaited<ReturnType<typeof compareAll>> | null = null;
       if (options.update) {
-        const count = await updateBaselines(captures);
+        const count = await timed("Updated baselines", () => updateBaselines(captures));
         printUpdateReport(count);
         exitCode = 0;
       } else {
-        const results = await compareAll(captures, snapshotConfig.threshold);
-        printReport(results);
-        exitCode = getExitCode(results);
+        compared = await timed("Compared against baselines", () =>
+          compareAll(captures, snapshotConfig.threshold),
+        );
+        printReport(compared);
+        exitCode = getExitCode(compared);
       }
 
       // The stories that rendered are compared and written above regardless;
@@ -86,6 +123,41 @@ export async function runSnapshots(
       if (failures.length > 0) {
         printFailures(failures);
         exitCode = 1;
+      }
+
+      if (options.json !== undefined || options.html !== undefined) {
+        // A filtered run skips stories on purpose, so a baseline it did not
+        // touch is not a removed one.
+        const removed = options.filter
+          ? []
+          : await findRemovedBaselines(
+              outDir,
+              [...captures, ...failures].map((c) => c.outputPath),
+            );
+        const report = await buildReport({
+          captures,
+          compared,
+          failures,
+          removed,
+          config: resolvedSnapshotConfig,
+          outDirName: snapshotConfig.outDir,
+          exitCode,
+          commit: process.env.GITHUB_SHA ?? null,
+        });
+
+        if (options.json !== undefined) {
+          const path = resolveReportPath(options.json, cwd, outDir, "report.json");
+          await writeJsonReport(path, report);
+          console.log(`JSON report: ${path}`);
+        }
+        if (options.html !== undefined) {
+          const path = resolveReportPath(options.html, cwd, outDir, "report.html");
+          const template = snapshotConfig.report.component
+            ? await loadReportTemplate(cwd, snapshotConfig.report.component)
+            : undefined;
+          await writeHtmlReport(path, report, outDir, template);
+          console.log(`HTML report: ${path}`);
+        }
       }
 
       if (options.codeowners) {
@@ -98,5 +170,6 @@ export async function runSnapshots(
     server.stop();
   }
 
+  console.log(`Done in ${formatDuration(performance.now() - runStartedAt)} (exit code ${exitCode})`);
   return exitCode;
 }

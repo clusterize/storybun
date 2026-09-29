@@ -46,6 +46,16 @@ export interface SnapshotConfig {
    * no suffix.
    */
   modes?: Record<string, SnapshotMode>;
+  /** Report output written by `snapshot --json` / `--html`. */
+  report?: {
+    /**
+     * Path to a module exporting a React component (default export or a
+     * named `Report`) that renders the HTML report in place of the built-in
+     * page. It receives `ReportTemplateProps` and is rendered statically in
+     * Bun, not in a browser.
+     */
+    component?: string;
+  };
 }
 
 export interface StorybunConfig {
@@ -72,6 +82,9 @@ export interface ResolvedSnapshotConfig {
   timezoneId: string;
   locale: string;
   modes: Record<string, SnapshotMode>;
+  report: {
+    component: string | null;
+  };
 }
 
 export interface ResolvedConfig {

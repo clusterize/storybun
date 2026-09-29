@@ -12,6 +12,7 @@ const snapshotDefaults: ResolvedSnapshotConfig = {
   timezoneId: "UTC",
   locale: "en-US",
   modes: {},
+  report: { component: null },
 };
 
 const defaults: ResolvedConfig = {
@@ -40,6 +41,10 @@ export async function loadConfig(cwd: string): Promise<ResolvedConfig> {
     port: userConfig.port ?? defaults.port,
     plugins: userConfig.plugins ?? [],
     components: { ...defaults.components, ...userConfig.components },
-    snapshot: { ...snapshotDefaults, ...userConfig.snapshot },
+    snapshot: {
+      ...snapshotDefaults,
+      ...userConfig.snapshot,
+      report: { component: userConfig.snapshot?.report?.component ?? null },
+    },
   };
 }

@@ -5,6 +5,7 @@ import { scanStories } from "./scanner.ts";
 import { buildAll } from "./builder.ts";
 import { startServer, updateServer } from "./server.ts";
 import { watchFiles } from "./watcher.ts";
+import { flagValue, parseOptionalPathFlag } from "./cli-args.ts";
 
 const cwd = process.cwd();
 
@@ -52,14 +53,6 @@ async function dev() {
   }, config.ignore);
 }
 
-function flagValue(args: string[], flag: string): string | undefined {
-  const idx = args.indexOf(flag);
-  if (idx !== -1 && args[idx + 1] && !args[idx + 1]!.startsWith("-")) {
-    return args[idx + 1];
-  }
-  return undefined;
-}
-
 function parseViewport(
   value: string | undefined,
 ): { width: number; height: number } | undefined {
@@ -81,7 +74,10 @@ async function snapshot(args: string[]) {
   const codeowners = args.includes("--codeowners");
   const filter = flagValue(args, "--filter");
 
-  const exitCode = await runSnapshots(cwd, { update, filter, codeowners });
+  const json = parseOptionalPathFlag(args, "--json");
+  const html = parseOptionalPathFlag(args, "--html");
+
+  const exitCode = await runSnapshots(cwd, { update, filter, codeowners, json, html });
   process.exit(exitCode);
 }
 
@@ -146,6 +142,8 @@ snapshot options:
   -u, --update       Accept the current render as the new baseline
       --filter <s>   Only stories whose key contains <s>
       --codeowners   Rewrite the CODEOWNERS entry for the snapshot directory
+      --json [path]  Write a machine-readable report (default: <outDir>/report.json)
+      --html [path]  Write a browsable HTML report (default: <outDir>/report.html)
 
 list options:
       --json         Emit JSON objects instead of bare keys

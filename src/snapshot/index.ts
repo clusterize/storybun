@@ -9,11 +9,18 @@ import { compareAll, updateBaselines } from "./compare.ts";
 import { printReport, printUpdateReport, printFailures, getExitCode } from "./report.ts";
 import { updateCodeowners } from "./codeowners.ts";
 import { loadPlaywright } from "./playwright.ts";
+import { buildReport, findRemovedBaselines } from "./report-model.ts";
+import { loadReportTemplate } from "./report-html.tsx";
+import { resolveReportPath, writeHtmlReport, writeJsonReport } from "./report-files.ts";
 
 interface SnapshotOptions {
   update: boolean;
   filter?: string;
   codeowners: boolean;
+  /** `--json [path]`: true for the default `<outDir>/report.json`. */
+  json?: string | true;
+  /** `--html [path]`: true for the default `<outDir>/report.html`. */
+  html?: string | true;
 }
 
 export async function runSnapshots(
@@ -70,14 +77,15 @@ export async function runSnapshots(
         return 0;
       }
 
+      let compared: Awaited<ReturnType<typeof compareAll>> | null = null;
       if (options.update) {
         const count = await updateBaselines(captures);
         printUpdateReport(count);
         exitCode = 0;
       } else {
-        const results = await compareAll(captures, snapshotConfig.threshold);
-        printReport(results);
-        exitCode = getExitCode(results);
+        compared = await compareAll(captures, snapshotConfig.threshold);
+        printReport(compared);
+        exitCode = getExitCode(compared);
       }
 
       // The stories that rendered are compared and written above regardless;
@@ -86,6 +94,41 @@ export async function runSnapshots(
       if (failures.length > 0) {
         printFailures(failures);
         exitCode = 1;
+      }
+
+      if (options.json !== undefined || options.html !== undefined) {
+        // A filtered run skips stories on purpose, so a baseline it did not
+        // touch is not a removed one.
+        const removed = options.filter
+          ? []
+          : await findRemovedBaselines(
+              outDir,
+              [...captures, ...failures].map((c) => c.outputPath),
+            );
+        const report = await buildReport({
+          captures,
+          compared,
+          failures,
+          removed,
+          config: resolvedSnapshotConfig,
+          outDirName: snapshotConfig.outDir,
+          exitCode,
+          commit: process.env.GITHUB_SHA ?? null,
+        });
+
+        if (options.json !== undefined) {
+          const path = resolveReportPath(options.json, cwd, outDir, "report.json");
+          await writeJsonReport(path, report);
+          console.log(`JSON report: ${path}`);
+        }
+        if (options.html !== undefined) {
+          const path = resolveReportPath(options.html, cwd, outDir, "report.html");
+          const template = snapshotConfig.report.component
+            ? await loadReportTemplate(cwd, snapshotConfig.report.component)
+            : undefined;
+          await writeHtmlReport(path, report, outDir, template);
+          console.log(`HTML report: ${path}`);
+        }
       }
 
       if (options.codeowners) {

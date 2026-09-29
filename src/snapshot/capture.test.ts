@@ -46,6 +46,7 @@ function testConfig(): ResolvedConfig {
       timezoneId: "UTC",
       locale: "en-US",
       modes: {},
+      report: { component: null },
     },
   };
 }

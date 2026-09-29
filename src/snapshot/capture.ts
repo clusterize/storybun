@@ -9,7 +9,10 @@ declare const document: any;
 /** A story that could not be captured; the run goes on without it. */
 export interface CaptureFailure {
   storyKey: string;
+  viewport: { width: number; height: number; name?: string };
   mode?: string;
+  /** The baseline this capture would have been compared against. */
+  outputPath: string;
   error: Error;
 }
 
@@ -445,7 +448,9 @@ export async function captureAll(
     } catch (err) {
       failures.push({
         storyKey,
+        viewport: item.viewport,
         mode: item.modeName,
+        outputPath: item.outputPath,
         error: err instanceof Error ? err : new Error(String(err)),
       });
     } finally {

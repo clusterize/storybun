@@ -76,8 +76,9 @@ async function snapshot(args: string[]) {
 
   const json = parseOptionalPathFlag(args, "--json");
   const html = parseOptionalPathFlag(args, "--html");
+  const quiet = args.includes("--quiet") || args.includes("-q");
 
-  const exitCode = await runSnapshots(cwd, { update, filter, codeowners, json, html });
+  const exitCode = await runSnapshots(cwd, { update, filter, codeowners, json, html, quiet });
   process.exit(exitCode);
 }
 
@@ -144,6 +145,7 @@ snapshot options:
       --codeowners   Rewrite the CODEOWNERS entry for the snapshot directory
       --json [path]  Write a machine-readable report (default: <outDir>/report.json)
       --html [path]  Write a browsable HTML report (default: <outDir>/report.html)
+  -q, --quiet        No per-capture progress lines; phases, failures and the summary only
 
 list options:
       --json         Emit JSON objects instead of bare keys

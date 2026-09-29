@@ -9,8 +9,8 @@ import type { ReportEntry, ReportStatus, SnapshotReport } from "./report-model.t
  *
  * A template is rendered once, in Bun, with `renderToStaticMarkup`: there is
  * no browser, no state, no effects, and no client bundle. Interactivity has to
- * come from what static HTML offers (`<details>`, anchors) or an inline
- * `<script>` string the template emits itself.
+ * come from what static HTML offers (`<details>`, radio inputs, anchors) or an
+ * inline `<script>` string the template emits itself.
  */
 export interface ReportTemplateProps {
   report: SnapshotReport;
@@ -41,37 +41,36 @@ function needsAttention(entries: ReportEntry[]): boolean {
 }
 
 function dims(d: { width: number; height: number } | null): string {
-  return d ? `${d.width}\u00d7${d.height}` : "?";
+  return d ? `${d.width}×${d.height}` : "?";
 }
 
 function entryLabel(entry: ReportEntry): string {
   const parts: string[] = [];
   if (entry.mode) parts.push(entry.mode);
   if (entry.viewport) {
-    parts.push(entry.viewport.name ?? `${entry.viewport.width}\u00d7${entry.viewport.height}`);
+    parts.push(entry.viewport.name ?? `${entry.viewport.width}×${entry.viewport.height}`);
   }
-  return parts.join(" \u00b7 ");
+  return parts.join(" · ");
 }
 
-function groupByStory(entries: ReportEntry[]): [string, ReportEntry[]][] {
+interface StoryGroup {
+  storyKey: string;
+  entries: ReportEntry[];
+  /** Position among all groups; the base of the ids the flip view needs. */
+  index: number;
+}
+
+function groupByStory(entries: ReportEntry[]): StoryGroup[] {
   const groups = new Map<string, ReportEntry[]>();
   for (const e of entries) {
     let list = groups.get(e.storyKey);
     if (!list) groups.set(e.storyKey, (list = []));
     list.push(e);
   }
-  return [...groups.entries()];
+  return [...groups.entries()].map(([storyKey, list], index) => ({ storyKey, entries: list, index }));
 }
 
-function Image({
-  prefix,
-  file,
-  caption,
-}: {
-  prefix: string;
-  file: string;
-  caption: string;
-}) {
+function Image({ prefix, file, caption }: { prefix: string; file: string; caption: string }) {
   return (
     <figure>
       <figcaption>{caption}</figcaption>
@@ -80,7 +79,53 @@ function Image({
   );
 }
 
-function Entry({ entry, prefix }: { entry: ReportEntry; prefix: string }) {
+/**
+ * Before, after and diff of one changed capture. Two views of the same
+ * images: a column grid that scales each image to a third of the width, and
+ * one image at a time in the same spot, so flipping between "before" and
+ * "after" makes the change jump out. The tabs are a radio group driven by
+ * CSS alone; the page still ships no script.
+ */
+function Comparison({ uid, entry, prefix }: { uid: string; entry: ReportEntry; prefix: string }) {
+  const { files } = entry;
+  const views: [string, string, string | null][] = [
+    ["grid", "side by side", null],
+    ["before", "before", files.baseline],
+    ["after", "after", files.actual],
+  ];
+  if (files.diff) views.push(["diff", "diff", files.diff]);
+  const columns = files.diff ? 3 : 2;
+
+  return (
+    <div className="compare">
+      {views.map(([key], i) => (
+        <input key={key} type="radio" className={`t-${key}`} id={`${uid}-${key}`} name={uid} defaultChecked={i === 0} />
+      ))}
+      <div className="tabs">
+        {views.map(([key, label]) => (
+          <label key={key} className={`l-${key}`} htmlFor={`${uid}-${key}`}>
+            {label}
+          </label>
+        ))}
+      </div>
+      <div className={`pane pane-grid images cols-${columns}`}>
+        {files.baseline && <Image prefix={prefix} file={files.baseline} caption="before" />}
+        {files.actual && <Image prefix={prefix} file={files.actual} caption="after" />}
+        {files.diff && <Image prefix={prefix} file={files.diff} caption="diff" />}
+      </div>
+      {views.slice(1).map(
+        ([key, label, file]) =>
+          file && (
+            <div key={key} className={`pane pane-${key} single`}>
+              <img src={`${prefix}${file}`} alt={label} loading="lazy" />
+            </div>
+          ),
+      )}
+    </div>
+  );
+}
+
+function Entry({ uid, entry, prefix }: { uid: string; entry: ReportEntry; prefix: string }) {
   const { files, dimensions } = entry;
   const label = entryLabel(entry);
   const dimensionChange =
@@ -96,22 +141,16 @@ function Entry({ entry, prefix }: { entry: ReportEntry; prefix: string }) {
         )}
         {dimensionChange && (
           <span className="detail">
-            {dims(dimensions.baseline)} {"\u2192"} {dims(dimensions.actual)}
+            {dims(dimensions.baseline)} {"→"} {dims(dimensions.actual)}
           </span>
         )}
         {entry.status === "capture-failed" && entry.error && (
           <span className="detail error">{entry.error}</span>
         )}
       </div>
-      {entry.status === "changed" && (
-        <div className="images">
-          {files.baseline && <Image prefix={prefix} file={files.baseline} caption="before" />}
-          {files.actual && <Image prefix={prefix} file={files.actual} caption="after" />}
-          {files.diff && <Image prefix={prefix} file={files.diff} caption="diff" />}
-        </div>
-      )}
+      {entry.status === "changed" && <Comparison uid={uid} entry={entry} prefix={prefix} />}
       {entry.status !== "changed" && entry.status !== "capture-failed" && files.baseline && (
-        <div className="images">
+        <div className="images cols-1">
           <Image
             prefix={prefix}
             file={files.baseline}
@@ -125,12 +164,12 @@ function Entry({ entry, prefix }: { entry: ReportEntry; prefix: string }) {
   );
 }
 
-function Story({ storyKey, entries, prefix }: { storyKey: string; entries: ReportEntry[]; prefix: string }) {
+function Story({ group, prefix }: { group: StoryGroup; prefix: string }) {
   return (
     <article className="story">
-      <h2>{storyKey}</h2>
-      {entries.map((entry, i) => (
-        <Entry key={i} entry={entry} prefix={prefix} />
+      <h2>{group.storyKey}</h2>
+      {group.entries.map((entry, i) => (
+        <Entry key={i} uid={`s${group.index}e${i}`} entry={entry} prefix={prefix} />
       ))}
     </article>
   );
@@ -171,11 +210,32 @@ h2 { font-size: 15px; margin: 0 0 8px; font-weight: 600; word-break: break-all; 
 .status-capture-failed .badge { background: var(--failed); }
 .detail { color: var(--muted); }
 .detail.error { color: var(--failed); font-family: ui-monospace, monospace; font-size: 13px; }
-.images { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
-figure { margin: 0; max-width: 100%; }
+.images { display: grid; gap: 12px; align-items: start; }
+.images.cols-1 { grid-template-columns: minmax(0, 1fr); }
+.images.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.images.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+figure { margin: 0; min-width: 0; }
 figcaption { color: var(--muted); font-size: 12px; margin: 0 0 4px; }
 img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line);
   background: repeating-conic-gradient(var(--line) 0 25%, transparent 0 50%) 0 0 / 16px 16px; }
+.images.cols-1 img { max-width: min(100%, 640px); }
+.compare { position: relative; }
+.compare > input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+.tabs { display: flex; gap: 2px; margin: 0 0 8px; border-bottom: 1px solid var(--line); }
+.tabs label { padding: 4px 10px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent;
+  margin-bottom: -1px; user-select: none; }
+.tabs label:hover { color: var(--fg); }
+.compare > input:focus-visible ~ .tabs { outline: 2px solid var(--new); outline-offset: 2px; }
+.pane { display: none; }
+.compare > input.t-grid:checked ~ .pane-grid,
+.compare > input.t-before:checked ~ .pane-before,
+.compare > input.t-after:checked ~ .pane-after,
+.compare > input.t-diff:checked ~ .pane-diff { display: grid; }
+.compare > input.t-grid:checked ~ .tabs .l-grid,
+.compare > input.t-before:checked ~ .tabs .l-before,
+.compare > input.t-after:checked ~ .tabs .l-after,
+.compare > input.t-diff:checked ~ .tabs .l-diff { color: var(--fg); border-bottom-color: var(--fg); font-weight: 600; }
+.single { grid-template-columns: minmax(0, 1fr); }
 details.quiet { border-top: 1px solid var(--line); padding: 12px 0; }
 details.quiet > summary { cursor: pointer; font-weight: 600; }
 `;
@@ -184,8 +244,8 @@ details.quiet > summary { cursor: pointer; font-weight: 600; }
 export function DefaultReport({ report, imagePrefix }: ReportTemplateProps) {
   const { summary, config } = report;
   const groups = groupByStory(report.results);
-  const attention = groups.filter(([, entries]) => needsAttention(entries));
-  const quiet = groups.filter(([, entries]) => !needsAttention(entries));
+  const attention = groups.filter((g) => needsAttention(g.entries));
+  const quiet = groups.filter((g) => !needsAttention(g.entries));
 
   const counts: [string, number, string][] = [
     ["passed", summary.passed, "pass"],
@@ -215,7 +275,7 @@ export function DefaultReport({ report, imagePrefix }: ReportTemplateProps) {
       <body>
         <header>
           <h1>Snapshot report</h1>
-          <p className="meta">{meta.join(" \u00b7 ")}</p>
+          <p className="meta">{meta.join(" · ")}</p>
           <ul className="counts">
             {counts
               .filter(([, n, key]) => n > 0 || key === "pass" || key === "changed")
@@ -227,16 +287,16 @@ export function DefaultReport({ report, imagePrefix }: ReportTemplateProps) {
           </ul>
         </header>
         <main>
-          {attention.map(([storyKey, entries]) => (
-            <Story key={storyKey} storyKey={storyKey} entries={entries} prefix={imagePrefix} />
+          {attention.map((group) => (
+            <Story key={group.storyKey} group={group} prefix={imagePrefix} />
           ))}
           {quiet.length > 0 && (
             <details className="quiet">
               <summary>
                 {quiet.length} {quietLabel} {quiet.length === 1 ? "story" : "stories"}
               </summary>
-              {quiet.map(([storyKey, entries]) => (
-                <Story key={storyKey} storyKey={storyKey} entries={entries} prefix={imagePrefix} />
+              {quiet.map((group) => (
+                <Story key={group.storyKey} group={group} prefix={imagePrefix} />
               ))}
             </details>
           )}

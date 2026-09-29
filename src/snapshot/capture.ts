@@ -1,5 +1,6 @@
 import type { Browser, Page } from "playwright";
 import type { StoryEntry, ResolvedSnapshotConfig, SnapshotMode } from "../types.ts";
+import type { CaptureHooks } from "./progress.ts";
 
 // tsconfig has no "dom" lib; declare the globals the in-page callbacks below
 // touch rather than casting through `any` at every use.
@@ -356,6 +357,7 @@ export async function captureAll(
   config: ResolvedSnapshotConfig,
   serverUrl: string,
   filter?: string,
+  hooks: CaptureHooks = {},
 ): Promise<CaptureOutcome> {
   const results: CaptureResult[] = [];
   const failures: CaptureFailure[] = [];
@@ -417,7 +419,10 @@ export async function captureAll(
   const concurrency = Math.min(config.concurrency, work.length || 1);
   const fixedTime = resolveFixedTime(config.clock);
 
+  hooks.onStart?.(work.length);
+
   let cursor = 0;
+  let finished = 0;
 
   // One story that cannot be captured must not take the other hundred with
   // it: a run that aborts on the first failure reports one problem per CI
@@ -426,6 +431,8 @@ export async function captureAll(
   // reports every failure together and fails the run on any.
   async function captureStory(item: (typeof work)[number]): Promise<void> {
     const storyKey = `${item.storyPath}--${item.exportName}`;
+    const startedAt = performance.now();
+    let error: Error | undefined;
     const page = await createPage(browser, config, fixedTime, item.mode);
 
     try {
@@ -446,15 +453,25 @@ export async function captureAll(
         outputPath: item.outputPath,
       });
     } catch (err) {
+      error = err instanceof Error ? err : new Error(String(err));
       failures.push({
         storyKey,
         viewport: item.viewport,
         mode: item.modeName,
         outputPath: item.outputPath,
-        error: err instanceof Error ? err : new Error(String(err)),
+        error,
       });
     } finally {
       await page.close();
+      hooks.onProgress?.({
+        index: ++finished,
+        total: work.length,
+        storyKey,
+        mode: item.modeName,
+        viewport: item.viewport,
+        durationMs: performance.now() - startedAt,
+        error,
+      });
     }
   }
 

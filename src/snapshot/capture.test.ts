@@ -338,6 +338,28 @@ describe("captureAll (real call site)", () => {
     expect(failures[0]!.error).toBeInstanceOf(Error);
   }, 30_000);
 
+  test("reports each finished capture through the progress hooks, failures included", async () => {
+    const config = snapshotConfig({ viewports: [{ width: 800, height: 600 }], concurrency: 2 });
+    const totals: number[] = [];
+    const events: { index: number; storyKey: string; failed: boolean; durationMs: number }[] = [];
+
+    await captureAll(browser, [emptyStory, stories[0]!, stories[1]!], config, serverUrl, undefined, {
+      onStart: (total) => totals.push(total),
+      onProgress: (e) => events.push({ index: e.index, storyKey: e.storyKey, failed: !!e.error, durationMs: e.durationMs }),
+    });
+
+    expect(totals).toEqual([3]);
+    expect(events.map((e) => e.index)).toEqual([1, 2, 3]);
+    expect(events.map((e) => e.storyKey).sort()).toEqual([
+      "fixtures/empty--Nothing",
+      "fixtures/narrow--Badge",
+      "fixtures/tall--Stack",
+    ]);
+    expect(events.find((e) => e.storyKey === "fixtures/empty--Nothing")!.failed).toBe(true);
+    expect(events.filter((e) => e.failed)).toHaveLength(1);
+    for (const e of events) expect(e.durationMs).toBeGreaterThan(0);
+  }, 30_000);
+
   test("includes content the story portaled to document.body, as an open menu or dialog is", async () => {
     const config = snapshotConfig({ viewports: [{ width: 800, height: 600 }], concurrency: 1 });
 

@@ -333,6 +333,29 @@ describe("HTML report", () => {
     expect(html).toContain("clock frozen at 2026-07-30T12:00:00.000Z");
   });
 
+  test("a changed capture gets a three-column grid and a script-free flip view between before, after and diff", async () => {
+    const html = renderReportHtml(await mixedReport(), "");
+    expect(html).not.toMatch(/<script/);
+    // The Button--Primary dark entry: pixel change with a diff image.
+    const start = html.indexOf("Components--Button--Primary-dark.png");
+    const entry = html.slice(html.lastIndexOf('<div class="compare">', start), html.indexOf("</article>", start));
+    expect(entry).toContain('class="pane pane-grid images cols-3"');
+    expect(entry.match(/<input type="radio"/g)).toHaveLength(4);
+    expect(entry).toContain('<label class="l-grid" for="s1e0-grid">side by side</label>');
+    expect(entry).toContain('<label class="l-before" for="s1e0-before">before</label>');
+    expect(entry).toContain('<label class="l-after" for="s1e0-after">after</label>');
+    expect(entry).toContain('<label class="l-diff" for="s1e0-diff">diff</label>');
+    expect(entry).toContain('class="t-grid" id="s1e0-grid" name="s1e0" checked=""');
+    expect(entry).toContain('class="pane pane-after single"');
+    expect(entry).toContain('class="pane pane-diff single"');
+  });
+
+  test("radio groups are unique per entry across stories", async () => {
+    const html = renderReportHtml(await mixedReport(), "");
+    const names = [...html.matchAll(/ name="(s\d+e\d+)"/g)].map((m) => m[1]);
+    expect(new Set(names).size).toBe(2); // two changed entries in the fixture
+  });
+
   test("a dimension change shows both sizes and no diff column", async () => {
     const html = renderReportHtml(await mixedReport(), "");
     expect(html).toContain("300×150 → 300×200");

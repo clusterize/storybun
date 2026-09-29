@@ -158,6 +158,22 @@ component polling on an interval simply re-renders the same output. Story
 fixtures should therefore express timestamps at or before the frozen instant, so
 that relative labels read as the past.
 
+### Progress and timing
+
+The run logs each phase with its duration and one line per finished capture:
+
+```
+Capturing 618 snapshots (309 stories in 42 files × 2 modes) with concurrency 4
+[  1/618] Components/Button--Primary [light] 830ms
+[  2/618] ✗ Timeline--Empty [light] 1.2s: story marker has no measurable content to capture
+...
+Captured in 1m32s
+Compared against baselines in 3.1s
+```
+
+`--quiet` (`-q`) drops the per-capture lines; failures, phases and the summary
+stay.
+
 ### Reports
 
 `snapshot` prints its result to stdout. Two flags add a machine-readable and a
@@ -222,9 +238,11 @@ is the exit code of the run, so a consumer never has to recompute it.
 
 `report.html` is one self-contained page: inline CSS, no script, no external
 requests, readable in light and dark. Stories that need a look (changed, new,
-removed, capture failed) come first with before, after and diff side by side;
-passed stories are folded away. Image paths are relative to the HTML file, so
-it works opened from `outDir` and served from a bucket next to the PNGs.
+removed, capture failed) come first; passed stories are folded away. A changed
+capture shows before, after and diff in three columns, and tabs that put one
+image at a time in the same spot, so flipping between "before" and "after"
+makes the change jump out. Image paths are relative to the HTML file, so it
+works opened from `outDir` and served from a bucket next to the PNGs.
 
 #### Custom HTML template
 

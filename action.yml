@@ -1,0 +1,215 @@
+name: "Storybun snapshots"
+description: >-
+  Capture every story, compare against the baselines, publish the HTML report
+  next to the images and keep one sticky comment on the pull request up to date.
+author: clusterize
+
+branding:
+  icon: camera
+  color: orange
+
+inputs:
+  working-directory:
+    description: Directory holding storybun.config.ts and the snapshot directory.
+    default: "."
+  command:
+    description: How to invoke storybun in the project (`bunx storybun`, `bun run storybun`, ...).
+    default: bunx storybun
+  snapshot-dir:
+    description: The configured `snapshot.outDir`, relative to `working-directory`. The reports are written into it.
+    default: __snapshots__
+  args:
+    description: Extra arguments for `storybun snapshot`, e.g. `--codeowners`.
+    default: ""
+  update:
+    description: Run with `--update`, replacing every baseline with this run's render (for the main branch).
+    default: "false"
+  quiet:
+    description: Pass `--quiet`; failures, phases and the summary still print.
+    default: "true"
+  install-browser:
+    description: Run `bunx playwright install --with-deps chromium` first.
+    default: "true"
+  fail-on-changes:
+    description: Fail the step when the run exits non-zero (changed stories or capture failures).
+    default: "true"
+
+  # Publishing: any S3-compatible bucket; for Cloudflare R2 set `s3-endpoint`.
+  s3-bucket:
+    description: Bucket to upload the snapshot directory to. Unset skips publishing.
+    default: ""
+  s3-endpoint:
+    description: Custom endpoint URL, e.g. `https://<account-id>.r2.cloudflarestorage.com` for R2.
+    default: ""
+  s3-prefix:
+    description: Key prefix inside the bucket. Default `pr-<number>/<sha>` on pull requests, `<ref>/<sha>` otherwise.
+    default: ""
+  public-base-url:
+    description: Public URL the bucket is served from; the report link is `<public-base-url>/<prefix>/report.html`.
+    default: ""
+  aws-access-key-id:
+    description: Credentials for the bucket. Alternatively set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY in `env`.
+    default: ""
+  aws-secret-access-key:
+    description: See `aws-access-key-id`.
+    default: ""
+  publish:
+    description: "`review` publishes only when something needs a look (changed, new, removed, capture failed); `always` publishes every run."
+    default: review
+
+  # Pull request comment
+  comment:
+    description: Keep one sticky comment on the pull request up to date with the result.
+    default: "true"
+  comment-on-pass:
+    description: Also post the short "match the baseline" comment when nothing needs a look.
+    default: "true"
+  github-token:
+    description: "Token used to post the comment; needs the pull-requests: write permission."
+    default: ${{ github.token }}
+
+outputs:
+  exit-code:
+    description: Exit code of `storybun snapshot` (0 pass, 1 changed or capture failed, 2 playwright missing).
+    value: ${{ steps.snapshot.outputs.exit-code }}
+  json-path:
+    description: Path of report.json.
+    value: ${{ steps.snapshot.outputs.json-path }}
+  html-path:
+    description: Path of report.html.
+    value: ${{ steps.snapshot.outputs.html-path }}
+  needs-review:
+    description: "`true` when anything changed, is new, was removed or failed to capture."
+    value: ${{ steps.summary.outputs.needs-review }}
+  summary:
+    description: The report's `summary` object as JSON.
+    value: ${{ steps.summary.outputs.summary }}
+  passed:
+    value: ${{ steps.summary.outputs.passed }}
+    description: Count.
+  changed:
+    value: ${{ steps.summary.outputs.changed }}
+    description: Count.
+  new:
+    value: ${{ steps.summary.outputs.new }}
+    description: Count.
+  removed:
+    value: ${{ steps.summary.outputs.removed }}
+    description: Count.
+  capture-failed:
+    value: ${{ steps.summary.outputs.capture-failed }}
+    description: Count.
+  report-url:
+    description: Public URL of the HTML report, empty when not published.
+    value: ${{ steps.publish.outputs.report-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install Chromium
+      if: inputs.install-browser == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: bunx playwright install --with-deps chromium
+
+    - name: Capture and compare
+      id: snapshot
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STORYBUN_COMMAND: ${{ inputs.command }}
+        STORYBUN_ARGS: ${{ inputs.args }}
+        STORYBUN_UPDATE: ${{ inputs.update }}
+        STORYBUN_QUIET: ${{ inputs.quiet }}
+        SNAPSHOT_DIR: ${{ inputs.snapshot-dir }}
+      run: |
+        flags=(--json --html)
+        [ "$STORYBUN_UPDATE" = "true" ] && flags+=(--update)
+        [ "$STORYBUN_QUIET" = "true" ] && flags+=(--quiet)
+        # shellcheck disable=SC2086
+        set +e
+        $STORYBUN_COMMAND snapshot "${flags[@]}" $STORYBUN_ARGS
+        code=$?
+        set -e
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        if [ ! -f "$SNAPSHOT_DIR/report.json" ]; then
+          echo "::error::$SNAPSHOT_DIR/report.json was not written. Does 'snapshot-dir' match snapshot.outDir in storybun.config.ts? (exit code $code)"
+          exit 1
+        fi
+        echo "json-path=$SNAPSHOT_DIR/report.json" >> "$GITHUB_OUTPUT"
+        echo "html-path=$SNAPSHOT_DIR/report.html" >> "$GITHUB_OUTPUT"
+
+    - name: Read the report
+      id: summary
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        REPORT_PATH: ${{ steps.snapshot.outputs.json-path }}
+      run: bun "$GITHUB_ACTION_PATH/action/outputs.ts"
+
+    - name: Publish the report
+      id: publish
+      if: inputs.s3-bucket != '' && (inputs.publish == 'always' || steps.summary.outputs.needs-review == 'true')
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        SNAPSHOT_DIR: ${{ inputs.snapshot-dir }}
+        S3_BUCKET: ${{ inputs.s3-bucket }}
+        S3_ENDPOINT: ${{ inputs.s3-endpoint }}
+        S3_PREFIX: ${{ inputs.s3-prefix }}
+        PUBLIC_BASE_URL: ${{ inputs.public-base-url }}
+        INPUT_AWS_ACCESS_KEY_ID: ${{ inputs.aws-access-key-id }}
+        INPUT_AWS_SECRET_ACCESS_KEY: ${{ inputs.aws-secret-access-key }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        REF_NAME: ${{ github.ref_name }}
+        SHA: ${{ github.sha }}
+      run: |
+        [ -n "$INPUT_AWS_ACCESS_KEY_ID" ] && export AWS_ACCESS_KEY_ID="$INPUT_AWS_ACCESS_KEY_ID"
+        [ -n "$INPUT_AWS_SECRET_ACCESS_KEY" ] && export AWS_SECRET_ACCESS_KEY="$INPUT_AWS_SECRET_ACCESS_KEY"
+        export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-auto}"
+        export AWS_EC2_METADATA_DISABLED=true
+
+        prefix="$S3_PREFIX"
+        if [ -z "$prefix" ]; then
+          if [ -n "$PR_NUMBER" ]; then prefix="pr-$PR_NUMBER/$SHA"; else prefix="$REF_NAME/$SHA"; fi
+        fi
+        endpoint=()
+        [ -n "$S3_ENDPOINT" ] && endpoint=(--endpoint-url "$S3_ENDPOINT")
+
+        # Images are immutable per commit; the two report files must never be served stale.
+        aws s3 sync "$SNAPSHOT_DIR/" "s3://$S3_BUCKET/$prefix/" \
+          --exclude "*" --include "*.png" \
+          --content-type "image/png" --cache-control "public, max-age=31536000, immutable" \
+          --no-progress --only-show-errors "${endpoint[@]}"
+        aws s3 cp "$SNAPSHOT_DIR/report.html" "s3://$S3_BUCKET/$prefix/report.html" \
+          --content-type "text/html; charset=utf-8" --content-disposition inline --cache-control "no-cache" \
+          --only-show-errors "${endpoint[@]}"
+        aws s3 cp "$SNAPSHOT_DIR/report.json" "s3://$S3_BUCKET/$prefix/report.json" \
+          --content-type "application/json" --cache-control "no-cache" \
+          --only-show-errors "${endpoint[@]}"
+
+        echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+        if [ -n "$PUBLIC_BASE_URL" ]; then
+          echo "report-url=${PUBLIC_BASE_URL%/}/$prefix/report.html" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Comment on the pull request
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        REPORT_PATH: ${{ steps.snapshot.outputs.json-path }}
+        REPORT_URL: ${{ steps.publish.outputs.report-url }}
+        COMMENT_ON_PASS: ${{ inputs.comment-on-pass }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: bun "$GITHUB_ACTION_PATH/action/comment.ts"
+
+    - name: Fail on changes
+      if: inputs.fail-on-changes == 'true' && steps.snapshot.outputs.exit-code != '0'
+      shell: bash
+      env:
+        CODE: ${{ steps.snapshot.outputs.exit-code }}
+      run: |
+        echo "::error::storybun snapshot exited with $CODE; see the summary and the report."
+        exit "$CODE"

@@ -275,6 +275,56 @@ there is no browser, so no state, effects or event handlers. Interactivity has
 to come from static HTML (`<details>`, anchors) or an inline `<script>` string
 the template emits itself. The default export or a named `Report` export is used.
 
+### GitHub Action
+
+The repository doubles as a composite action that runs `snapshot --json --html`,
+publishes the snapshot directory to an S3-compatible bucket (Cloudflare R2
+included) and keeps one sticky comment on the pull request up to date. Bun and
+`bun install` are the caller's job, as is restoring the baselines; the action
+owns everything after that.
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+
+steps:
+  - uses: actions/checkout@v4
+  - uses: oven-sh/setup-bun@v2
+  - run: bun install --frozen-lockfile
+
+  - uses: actions/cache/restore@v4
+    with:
+      path: __snapshots__
+      key: snapshots-main-${{ github.sha }}
+      restore-keys: snapshots-main-
+
+  - uses: clusterize/storybun@v1
+    id: snapshots
+    with:
+      s3-bucket: gh-issue-assets
+      s3-endpoint: https://${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      public-base-url: https://assets.example.com
+      aws-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      aws-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+```
+
+Every run writes both reports, adds a job summary with the counts, and exposes
+them as outputs (`exit-code`, `needs-review`, `changed`, `new`, `removed`,
+`capture-failed`, `report-url`, ...). When a bucket is configured the images go
+up under `pr-<number>/<sha>/` (`<ref>/<sha>/` outside pull requests) with the
+two report files next to them, so the relative image paths in `report.html`
+resolve unchanged; the comment links to `<public-base-url>/<prefix>/report.html`.
+By default that happens only when something needs a look (`publish: always`
+changes it). The step fails when the run exits non-zero, i.e. on changed stories
+or capture failures; `fail-on-changes: false` turns that into an output only.
+
+On the main branch, `update: true` runs `--update` so a following
+`actions/cache/save` step stores the refreshed baselines. Inputs cover the
+working directory, the storybun command, extra arguments such as
+`--codeowners`, the snapshot directory (it must match `snapshot.outDir`), and
+whether to install Chromium; see `action.yml` for the full list.
+
 ### Single Snapshots
 
 `storybun snapshot` is a regression check: it owns `outDir` and rewrites what it

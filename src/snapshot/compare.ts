@@ -114,6 +114,22 @@ export async function compareAll(
   return results;
 }
 
+/**
+ * Deletes baselines no story produces anymore, together with any stale
+ * `.actual.png` / `.diff.png` next to them. Only `--update` calls this, and
+ * only without `--filter`: a filtered run skips stories on purpose, and a
+ * story that failed to capture still counts as present, so a flaky capture
+ * never drops a baseline. Returns the number of baselines deleted.
+ */
+export async function pruneBaselines(paths: string[]): Promise<number> {
+  for (const path of paths) {
+    await removeIfExists(path);
+    await removeIfExists(toActualPath(path));
+    await removeIfExists(toDiffPath(path));
+  }
+  return paths.length;
+}
+
 export async function updateBaselines(
   captures: CaptureResult[],
 ): Promise<number> {

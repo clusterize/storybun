@@ -6,7 +6,7 @@ import { PNG } from "pngjs";
 
 import type { ResolvedSnapshotConfig } from "../types.ts";
 import type { CaptureFailure, CaptureResult } from "./capture.ts";
-import type { CompareResult } from "./compare.ts";
+import { pruneBaselines, type CompareResult } from "./compare.ts";
 import {
   buildReport,
   findRemovedBaselines,
@@ -297,6 +297,49 @@ describe("buildReport", () => {
       diff: null,
     });
     expect(report.commit).toBeNull();
+  });
+});
+
+describe("pruning removed baselines (--update)", () => {
+  test("a pruned report lists the removed entry with its dimensions but no file", async () => {
+    const report = await buildReport({
+      captures,
+      compared: null,
+      failures: [],
+      removed: [join(outDir, "Components--Old--Gone-light.png")],
+      pruned: true,
+      config: config(),
+      outDirName: "__snapshots__",
+      exitCode: 0,
+      now,
+    });
+    const [entry] = report.results.filter((r) => r.status === "removed");
+    expect(entry).toMatchObject({
+      storyKey: "Components--Old--Gone-light",
+      dimensions: { baseline: { width: 10, height: 10 }, actual: null },
+      files: { baseline: null, actual: null, diff: null },
+    });
+    expect(report.summary.removed).toBe(1);
+  });
+
+  test("pruneBaselines deletes the baseline and its stale actual and diff, nothing else", async () => {
+    const stale = join(outDir, "Components--Stale--One-light.png");
+    await Bun.write(stale, png(4, 4));
+    await Bun.write(stale.replace(/\.png$/, ".actual.png"), png(4, 4));
+    await Bun.write(stale.replace(/\.png$/, ".diff.png"), png(4, 4));
+    const keep = captures[0]!.outputPath;
+
+    expect(await pruneBaselines([stale])).toBe(1);
+
+    expect(await Bun.file(stale).exists()).toBe(false);
+    expect(await Bun.file(stale.replace(/\.png$/, ".actual.png")).exists()).toBe(false);
+    expect(await Bun.file(stale.replace(/\.png$/, ".diff.png")).exists()).toBe(false);
+    expect(await Bun.file(keep).exists()).toBe(true);
+    expect(await Bun.file(join(outDir, "Components--Old--Gone-light.png")).exists()).toBe(true);
+  });
+
+  test("pruning a path that is already gone is not an error", async () => {
+    expect(await pruneBaselines([join(outDir, "never-existed.png")])).toBe(1);
   });
 });
 

@@ -5,8 +5,8 @@ import { scanStories } from "../scanner.ts";
 import { buildSnapshotEntry } from "./entry.ts";
 import { startSnapshotServer } from "./server.ts";
 import { captureAll } from "./capture.ts";
-import { compareAll, updateBaselines } from "./compare.ts";
-import { printReport, printUpdateReport, printFailures, getExitCode } from "./report.ts";
+import { compareAll, pruneBaselines, updateBaselines } from "./compare.ts";
+import { printReport, printUpdateReport, printFailures, printPruned, getExitCode } from "./report.ts";
 import { updateCodeowners } from "./codeowners.ts";
 import { loadPlaywright } from "./playwright.ts";
 import { buildReport, findRemovedBaselines } from "./report-model.ts";
@@ -125,20 +125,26 @@ export async function runSnapshots(
         exitCode = 1;
       }
 
+      // A filtered run skips stories on purpose, so a baseline it did not
+      // touch is not a removed one. Without a filter, an update run is the
+      // one place a stale baseline can safely go: the run just rewrote every
+      // baseline it could produce, and a story that failed to capture still
+      // counts as present.
+      const removed = options.filter
+        ? []
+        : await findRemovedBaselines(
+            outDir,
+            [...captures, ...failures].map((c) => c.outputPath),
+          );
+      const prune = options.update && !options.filter && removed.length > 0;
+
       if (options.json !== undefined || options.html !== undefined) {
-        // A filtered run skips stories on purpose, so a baseline it did not
-        // touch is not a removed one.
-        const removed = options.filter
-          ? []
-          : await findRemovedBaselines(
-              outDir,
-              [...captures, ...failures].map((c) => c.outputPath),
-            );
         const report = await buildReport({
           captures,
           compared,
           failures,
           removed,
+          pruned: prune,
           config: resolvedSnapshotConfig,
           outDirName: snapshotConfig.outDir,
           exitCode,
@@ -158,6 +164,12 @@ export async function runSnapshots(
           await writeHtmlReport(path, report, outDir, template);
           console.log(`HTML report: ${path}`);
         }
+      }
+
+      // After the report, which still measured the files.
+      if (prune) {
+        await pruneBaselines(removed);
+        printPruned(removed);
       }
 
       if (options.codeowners) {

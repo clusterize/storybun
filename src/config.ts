@@ -4,6 +4,7 @@ import type { ResolvedConfig, ResolvedSnapshotConfig, StorybunConfig } from "./t
 const snapshotDefaults: ResolvedSnapshotConfig = {
   outDir: "__snapshots__",
   threshold: 0.1,
+  maxDiffPixels: 0,
   viewports: [{ width: 1280, height: 720 }],
   waitTimeout: 0,
   concurrency: 4,

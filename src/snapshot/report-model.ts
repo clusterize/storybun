@@ -73,6 +73,7 @@ export interface ReportSummary {
 
 export interface ReportConfig {
   threshold: number;
+  maxDiffPixels: number;
   viewports: ReportViewport[];
   modes: string[];
   clock: string | null;
@@ -229,11 +230,13 @@ export async function buildReport(input: BuildReportInput): Promise<SnapshotRepo
       continue;
     }
 
+    // A pass may still carry a diffPercent above zero: the difference stayed
+    // within `maxDiffPixels`, so no actual or diff image was kept.
     if (compared.status === "pass") {
       entries.push({
         ...base,
         status: "pass",
-        diffPercent: 0,
+        diffPercent: compared.diffPercent,
         dimensions: { baseline: actualDims, actual: actualDims },
         files: { baseline: baselineFile, actual: null, diff: null },
       });
@@ -315,6 +318,7 @@ export async function buildReport(input: BuildReportInput): Promise<SnapshotRepo
     summary,
     config: {
       threshold: config.threshold,
+      maxDiffPixels: config.maxDiffPixels,
       viewports: config.viewports,
       modes: Object.keys(config.modes),
       clock: config.clock,

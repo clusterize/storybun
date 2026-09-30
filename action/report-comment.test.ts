@@ -35,7 +35,7 @@ function report(results: ReportEntry[], overrides: Partial<SnapshotReport["summa
       exitCode: count("changed") + count("capture-failed") > 0 ? 1 : 0,
       ...overrides,
     },
-    config: { threshold: 0.1, viewports: [{ width: 1280, height: 720 }], modes: ["light"], clock: null, locale: "en-US", timezoneId: "UTC" },
+    config: { threshold: 0.1, maxDiffPixels: 0, viewports: [{ width: 1280, height: 720 }], modes: ["light"], clock: null, locale: "en-US", timezoneId: "UTC" },
     results,
   };
 }

@@ -90,7 +90,9 @@ export default {
 `bunx storybun snapshot` renders every story in headless Chromium and compares it
 against the baseline in `outDir`, writing `<story>.actual.png` and
 `<story>.diff.png` for anything that moved. `--update` accepts the current render
-as the new baseline.
+as the new baseline and deletes baselines that no story produces anymore
+(unless `--filter` narrowed the run), so a renamed or deleted story does not
+leave its old image behind.
 
 Each image is cropped to the story's own box: what the story rendered, plus
 anything it portaled next to the app root, so a menu, popover or dialog rendered
@@ -226,10 +228,12 @@ How each outcome appears:
   that freshly written image. No `.actual.png` is written for it.
 - **changed** -- `files.baseline` is the old image, `files.actual` the new one,
   `files.diff` the pixelmatch output, or `null` when the dimensions changed.
-- **removed** -- a `<key>.png` in `outDir` that no story produced anymore. It is
-  reported, not deleted, and does not affect the exit code. `storyKey` is the
-  filename stem, since the story it belonged to is gone. Not reported under
-  `--filter`, where skipped stories are intended.
+- **removed** -- a `<key>.png` in `outDir` that no story produced anymore. A
+  comparison run reports it and leaves it in place; an `--update` run deletes
+  it (with any stale `.actual.png` / `.diff.png`) after the report is built, and
+  its entry then lists no file. Never affects the exit code. `storyKey` is the
+  filename stem, since the story it belonged to is gone. Not reported, and never
+  deleted, under `--filter`, where skipped stories are intended.
 - **capture-failed** -- the story could not be captured; `error` says why.
 - **updated** -- every capture of an `--update` run.
 
@@ -320,7 +324,8 @@ changes it). The step fails when the run exits non-zero, i.e. on changed stories
 or capture failures; `fail-on-changes: false` turns that into an output only.
 
 On the main branch, `update: true` runs `--update` so a following
-`actions/cache/save` step stores the refreshed baselines. Inputs cover the
+`actions/cache/save` step stores the refreshed baselines, with the baselines of
+deleted or renamed stories pruned. Inputs cover the
 working directory, the storybun command, extra arguments such as
 `--codeowners`, the snapshot directory (it must match `snapshot.outDir`), and
 whether to install Chromium; see `action.yml` for the full list.

@@ -53,6 +53,20 @@ export function printUpdateReport(count: number): void {
   console.log(`\nstorybun snapshot: updated ${count} baseline(s)\n`);
 }
 
+const PRUNE_LIST_LIMIT = 20;
+
+export function printPruned(paths: string[]): void {
+  if (paths.length === 0) return;
+  console.log(`\u2212 ${paths.length} stale baseline(s) deleted (no story produces them anymore):`);
+  for (const path of paths.slice(0, PRUNE_LIST_LIMIT)) {
+    console.log(`  ${path.split("/").pop()}`);
+  }
+  if (paths.length > PRUNE_LIST_LIMIT) {
+    console.log(`  +${paths.length - PRUNE_LIST_LIMIT} more`);
+  }
+  console.log();
+}
+
 export function getExitCode(results: CompareResult[]): number {
   return results.some((r) => r.status === "fail") ? 1 : 0;
 }

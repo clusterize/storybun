@@ -99,6 +99,12 @@ export interface BuildReportInput {
   failures: CaptureFailure[];
   /** Absolute paths of baselines no story produced; see `findRemovedBaselines`. */
   removed: string[];
+  /**
+   * True when the run deletes the removed baselines after this report is
+   * built (`--update`): their entries then list no file, since none exists
+   * once the run is over.
+   */
+  pruned?: boolean;
   /** The snapshot config with `outDir` resolved to an absolute path. */
   config: ResolvedSnapshotConfig;
   /** `outDir` as configured, for the JSON. */
@@ -275,7 +281,7 @@ export async function buildReport(input: BuildReportInput): Promise<SnapshotRepo
       status: "removed",
       diffPercent: null,
       dimensions: { baseline: await fileDimensions(path), actual: null },
-      files: { baseline: file, actual: null, diff: null },
+      files: { baseline: input.pruned ? null : file, actual: null, diff: null },
       error: null,
     });
   }

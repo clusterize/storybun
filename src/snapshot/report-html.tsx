@@ -259,6 +259,7 @@ export function DefaultReport({ report, imagePrefix }: ReportTemplateProps) {
   const meta: string[] = [];
   if (report.commit) meta.push(`commit ${report.commit.slice(0, 7)}`);
   meta.push(`threshold ${config.threshold}`);
+  if (config.maxDiffPixels > 0) meta.push(`up to ${config.maxDiffPixels} differing pixels tolerated`);
   if (config.clock) meta.push(`clock frozen at ${config.clock}`);
   meta.push(`generated ${report.generatedAt}`);
 

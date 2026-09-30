@@ -22,7 +22,20 @@ export interface SnapshotMode {
 
 export interface SnapshotConfig {
   outDir?: string;
+  /**
+   * Per-pixel colour sensitivity handed to pixelmatch, 0 to 1 (default: 0.1).
+   * Lower is stricter. It decides whether one pixel counts as different, not
+   * how many differing pixels a story may have; see `maxDiffPixels` for that.
+   */
   threshold?: number;
+  /**
+   * Number of differing pixels a story may have and still pass (default: 0).
+   * Absorbs the handful of edge pixels Chromium rasterises differently from
+   * one machine to the next -- the antialiased seam where a clipped, filtered
+   * image overlaps another, for instance -- without hiding a real change,
+   * which touches far more pixels than that.
+   */
+  maxDiffPixels?: number;
   viewports?: { width: number; height: number; name?: string }[];
   waitTimeout?: number;
   concurrency?: number;
@@ -74,6 +87,7 @@ export interface StorybunConfig {
 export interface ResolvedSnapshotConfig {
   outDir: string;
   threshold: number;
+  maxDiffPixels: number;
   viewports: { width: number; height: number; name?: string }[];
   waitTimeout: number;
   concurrency: number;

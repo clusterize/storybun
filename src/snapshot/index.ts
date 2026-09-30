@@ -111,7 +111,7 @@ export async function runSnapshots(
         exitCode = 0;
       } else {
         compared = await timed("Compared against baselines", () =>
-          compareAll(captures, snapshotConfig.threshold),
+          compareAll(captures, snapshotConfig.threshold, snapshotConfig.maxDiffPixels),
         );
         printReport(compared);
         exitCode = getExitCode(compared);

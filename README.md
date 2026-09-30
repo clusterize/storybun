@@ -109,8 +109,17 @@ export default {
     // Where baselines live (default: "__snapshots__")
     outDir: "__snapshots__",
 
-    // Percentage of differing pixels tolerated (default: 0.1)
+    // Per-pixel colour sensitivity for pixelmatch, 0 to 1 (default: 0.1).
+    // Lower is stricter. It decides whether a pixel counts as different, not
+    // how many may differ.
     threshold: 0.1,
+
+    // Differing pixels a story may have and still pass (default: 0). Chromium
+    // rasterises a few edge pixels differently from one machine to the next --
+    // the antialiased seam of overlapping clipped images, say -- and without a
+    // budget those read as a change on every other CI run. A real change
+    // touches far more pixels than a small budget lets through.
+    maxDiffPixels: 0,
 
     // Viewport sizes to render each story at before capture (default: one
     // 1280x720 viewport). The captured image is cropped to the story's own

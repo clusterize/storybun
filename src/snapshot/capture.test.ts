@@ -38,6 +38,7 @@ function testConfig(): ResolvedConfig {
     snapshot: {
       outDir: "__snapshots__",
       threshold: 0.1,
+      maxDiffPixels: 0,
       viewports: [{ width: 800, height: 600 }],
       waitTimeout: 0,
       concurrency: 1,

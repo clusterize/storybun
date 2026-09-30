@@ -23,13 +23,25 @@ export interface CompareResult {
   storyKey: string;
   mode?: string;
   status: CompareStatus;
+  /**
+   * Share of pixels that differ from the baseline, 0 to 100. Non-zero on a
+   * pass only when the difference stayed within `maxDiffPixels`.
+   */
   diffPercent: number;
   outputPath: string;
 }
 
+/**
+ * Compare every capture against its baseline on disk. `threshold` is
+ * pixelmatch's per-pixel colour sensitivity; `maxDiffPixels` is how many
+ * pixels may differ before the story counts as changed. A story within that
+ * budget passes and leaves no actual/diff image behind, so a stray edge pixel
+ * on one CI machine does not read as a change.
+ */
 export async function compareAll(
   captures: CaptureResult[],
   threshold: number,
+  maxDiffPixels = 0,
 ): Promise<CompareResult[]> {
   const results: CompareResult[] = [];
 
@@ -86,14 +98,14 @@ export async function compareAll(
     const totalPixels = width * height;
     const diffPercent = totalPixels > 0 ? (numDiffPixels / totalPixels) * 100 : 0;
 
-    if (numDiffPixels === 0) {
+    if (numDiffPixels <= maxDiffPixels) {
       await removeIfExists(actualPath);
       await removeIfExists(diffPath);
       results.push({
         storyKey: capture.storyKey,
         mode: capture.mode,
         status: "pass",
-        diffPercent: 0,
+        diffPercent,
         outputPath: capture.outputPath,
       });
     } else {

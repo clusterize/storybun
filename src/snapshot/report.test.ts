@@ -38,6 +38,7 @@ function config(): ResolvedSnapshotConfig {
   return {
     outDir,
     threshold: 0.1,
+    maxDiffPixels: 0,
     viewports: [viewport],
     waitTimeout: 0,
     concurrency: 1,
@@ -194,6 +195,7 @@ describe("buildReport", () => {
     expect(report.commit).toBe("0123456789abcdef");
     expect(report.config).toEqual({
       threshold: 0.1,
+      maxDiffPixels: 0,
       viewports: [viewport],
       modes: ["light", "dark"],
       clock: "2026-07-30T12:00:00.000Z",

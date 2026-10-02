@@ -40,7 +40,7 @@ function config(): ResolvedSnapshotConfig {
     threshold: 0.1,
     maxDiffPixels: 0,
     viewports: [viewport],
-    waitTimeout: 0,
+    settleTimeout: 2_000,
     concurrency: 1,
     codeowners: [],
     clock: "2026-07-30T12:00:00.000Z",
@@ -53,7 +53,14 @@ function config(): ResolvedSnapshotConfig {
 
 function capture(storyKey: string, mode: string, buffer: Buffer): CaptureResult {
   const file = `${storyKey.replace(/\//g, "--")}-${mode}.png`;
-  return { storyKey, mode, viewport, buffer, outputPath: join(outDir, file) };
+  return {
+    storyKey,
+    mode,
+    viewport,
+    buffer,
+    outputPath: join(outDir, file),
+    dimensions: pngDimensions(buffer)!,
+  };
 }
 
 function compared(c: CaptureResult, status: CompareResult["status"], diffPercent = 0): CompareResult {

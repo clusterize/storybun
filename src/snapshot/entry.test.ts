@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { generateSnapshotEntry } from "./entry.ts";
+import { generateSnapshotEntry, generateSnapshotHtml } from "./entry.ts";
 import type { PackageInfo, ResolvedConfig, StoryEntry } from "../types.ts";
 
 function testConfig(): ResolvedConfig {
@@ -14,7 +14,7 @@ function testConfig(): ResolvedConfig {
       threshold: 0.1,
       maxDiffPixels: 0,
       viewports: [{ width: 800, height: 600 }],
-      waitTimeout: 0,
+      settleTimeout: 2_000,
       concurrency: 1,
       codeowners: [],
       clock: null,
@@ -61,6 +61,34 @@ describe("generateSnapshotEntry", () => {
     const code = generateSnapshotEntry(stories, testPackages(), testConfig(), "/tmp");
 
     expect(code).not.toMatch(/\[data-storybun-story\]\s*\{[^}]*width/);
+  });
+});
+
+describe("generateSnapshotEntry readiness hooks", () => {
+  const stories: StoryEntry[] = [
+    { path: "a/b", filePath: "/tmp/a.stories.tsx", exports: ["Foo"], packageName: "test-pkg" },
+  ];
+
+  test("keeps the CSS animation kill switch as the backstop for reduced-motion emulation", () => {
+    const code = generateSnapshotEntry(stories, testPackages(), testConfig(), "/tmp");
+    expect(code).toContain("animation-duration: 0s !important");
+    expect(code).toContain("transition-duration: 0s !important");
+  });
+
+  test("records iframe load events for the settle check, from before any story renders", () => {
+    const code = generateSnapshotEntry(stories, testPackages(), testConfig(), "/tmp");
+    expect(code).toContain("__storybunLoadedFrames");
+    // The listener must be registered in the capture phase, since `load`
+    // does not bubble, and before `renderStory()` is called.
+    expect(code.indexOf('addEventListener(\n  "load"')).toBeGreaterThan(-1);
+    expect(code.indexOf("__storybunLoadedFrames")).toBeLessThan(code.indexOf("renderStory()"));
+  });
+});
+
+describe("generateSnapshotHtml", () => {
+  test("flags the document as a snapshot capture before any script runs", () => {
+    const html = generateSnapshotHtml(new Map());
+    expect(html).toContain('<html lang="en" data-storybun-snapshot>');
   });
 });
 

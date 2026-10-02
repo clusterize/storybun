@@ -1,11 +1,14 @@
-import type { Browser, Page } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright";
 import type { StoryEntry, ResolvedSnapshotConfig, SnapshotMode } from "../types.ts";
 import type { CaptureHooks } from "./progress.ts";
+import { pngDimensions, type PngDimensions } from "./png.ts";
 
 // tsconfig has no "dom" lib; declare the globals the in-page callbacks below
 // touch rather than casting through `any` at every use.
 declare const window: any;
 declare const document: any;
+declare const MutationObserver: any;
+declare const requestAnimationFrame: any;
 
 /** A story that could not be captured; the run goes on without it. */
 export interface CaptureFailure {
@@ -17,18 +20,27 @@ export interface CaptureFailure {
   error: Error;
 }
 
-export interface CaptureOutcome {
-  captures: CaptureResult[];
-  failures: CaptureFailure[];
-}
-
-export interface CaptureResult {
+/**
+ * What `captureAll` keeps of a capture once its hook has run: everything but
+ * the pixels. The PNG itself is handed to `hooks.onCapture` and dropped, so a
+ * run holds at most `concurrency` images in memory, not one per story.
+ */
+export interface CaptureRecord {
   storyKey: string;
   viewport: { width: number; height: number; name?: string };
   /** Name of the snapshot mode this was captured in; unset when none are configured. */
   mode?: string;
-  buffer: Buffer;
   outputPath: string;
+  dimensions: PngDimensions;
+}
+
+export interface CaptureResult extends CaptureRecord {
+  buffer: Buffer;
+}
+
+export interface CaptureOutcome {
+  captures: CaptureRecord[];
+  failures: CaptureFailure[];
 }
 
 // The bare `<key>.png` name is kept for the single-viewport, no-modes case so
@@ -79,13 +91,15 @@ function resolveFixedTime(clock: string | null): Date | null {
   return time;
 }
 
-// By the time this runs, the caller has already awaited __STORYBUN_READY__
-// (captureAll does, and direct callers must too -- see capture.test.ts), and
-// readiness itself is only signalled after `document.fonts.ready` plus two
-// animation frames past the render/error branch in entry.ts. So the marker
-// (or the known-error state) should already be settled; this timeout is a
-// small safety margin for residual layout, not a real "wait for render".
+// By the time this runs, `renderStory` has already waited for the story to
+// settle, and settling requires the marker to be attached with a measurable
+// box. So the marker should already be there; this timeout is a small safety
+// margin for a caller that drives the page itself, not a real "wait for
+// render".
 const MARKER_TIMEOUT_MS = 500;
+
+/** Pause between two settle probes, so a story mid-render is not hammered. */
+const SETTLE_POLL_MS = 50;
 
 interface StoryRect {
   x: number;
@@ -116,6 +130,9 @@ interface StoryRect {
 // run and not another depending on which side of .5 it fell. Rounding
 // outward always fully contains the content and is deterministic run to
 // run, which matters because these images become diffed baselines.
+//
+// This function is serialised and evaluated inside the page, so it must stay
+// self-contained: no reference to anything else in this module.
 function measureStoryRect(): StoryRect | null {
   const marker = document.querySelector("[data-storybun-story]");
   if (!marker) return null;
@@ -186,10 +203,235 @@ function measureStoryRect(): StoryRect | null {
   return { x, y, width, height };
 }
 
+/** One probe of the in-page readiness contract. */
+interface SettleVerdict {
+  settled: boolean;
+  /** Why the story is not settled yet; named in the error when the cap is hit. */
+  reason?: string;
+}
+
+// The readiness contract, evaluated inside the page. `__STORYBUN_READY__` is
+// a first-paint heuristic (render scheduled, fonts ready, two frames); this
+// is what actually decides that the story is done rendering. Each condition
+// below closes a gap that a blind `waitTimeout` sleep used to paper over:
+//
+// - the marker must be committed with a measurable box (React commits are
+//   scheduled, and under load the two frames pass before the story is in
+//   the DOM; a story that returns null until its data arrives has a marker
+//   but no box);
+// - `window.__storybunPending`, a counter (or a function returning one) the
+//   host Wrapper may drive from its data layer, must be zero -- the only
+//   signal that knows about a re-render that has not happened yet;
+// - fonts loaded and every image complete, in the page and in every
+//   same-origin framed document (an iframe's `load` does not wait for the
+//   fonts its document uses);
+// - no animation running: with reduced motion emulated and CSS durations
+//   zeroed that is almost always true at once; a finite animation that is
+//   not is simply waited for, and one that would never end (infinite
+//   iterations, a spinner) is paused at its first frame so the story can
+//   settle at all, and settle on the same frame every run;
+// - the DOM did not mutate and the measured box did not move across two
+//   consecutive frames.
+//
+// It runs again and again until it says settled or the cap is hit, so it
+// must be cheap, and it must be self-contained apart from `measureStoryRect`,
+// which the caller splices into the same script.
+async function checkSettled(): Promise<SettleVerdict> {
+  // The entry rendered an error message instead of a story. Nothing more
+  // will arrive, so there is nothing to wait for.
+  if (document.body.dataset.storybunError === "true") return { settled: true };
+
+  if (!document.querySelector("[data-storybun-story]")) {
+    return { settled: false, reason: "the story marker has not been committed to the DOM" };
+  }
+
+  const pending = window.__storybunPending;
+  const pendingCount = typeof pending === "function" ? Number(pending()) : Number(pending ?? 0);
+  if (pendingCount > 0) {
+    return {
+      settled: false,
+      reason: `window.__storybunPending reports ${pendingCount} pending operation(s)`,
+    };
+  }
+
+  // Every document the story shows: the page itself plus every same-origin
+  // framed document under it, recursively. A mail preview rendered into
+  // `srcdoc` loads its own web fonts and images, and an iframe's `load`
+  // event does not wait for fonts: the frame reports loaded while its text
+  // still sits in the fallback face, and a capture taken then shifts by a
+  // pixel against one taken a second later. So fonts and images are checked
+  // in each document, not only the top one.
+  const documents: any[] = [];
+  const loadedFrames = window.__storybunLoadedFrames;
+  const collect = (doc: any): SettleVerdict | null => {
+    documents.push(doc);
+    const frames = doc.querySelectorAll("iframe") as ArrayLike<any>;
+    for (let i = 0; i < frames.length; i++) {
+      const frame = frames[i];
+      const src = frame.getAttribute("src");
+      const hasSource = (src !== null && src !== "" && src !== "about:blank") || frame.hasAttribute("srcdoc");
+      if (!hasSource) continue;
+      if (doc === document && loadedFrames && !loadedFrames.has(frame)) {
+        return { settled: false, reason: `an iframe has not fired load yet (${src ?? "srcdoc"})` };
+      }
+      // A cross-origin document is opaque; the load event above is all there
+      // is. A same-origin one must also have left the initial about:blank
+      // behind and finished parsing, and is then checked like the page.
+      let inner: any = null;
+      try {
+        inner = frame.contentDocument;
+      } catch {}
+      if (!inner) continue;
+      if (inner.URL === "about:blank" || inner.readyState !== "complete") {
+        return { settled: false, reason: `an iframe document is still loading (${src ?? "srcdoc"})` };
+      }
+      const nested = collect(inner);
+      if (nested) return nested;
+    }
+    return null;
+  };
+  const framePending = collect(document);
+  if (framePending) return framePending;
+
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const images: any[] = [];
+  for (const doc of documents) {
+    if (doc.fonts && doc.fonts.status === "loading") {
+      return {
+        settled: false,
+        reason: doc === document ? "fonts are still loading" : "fonts in an iframe are still loading",
+      };
+    }
+    const docImages = doc.images as ArrayLike<any>;
+    for (let i = 0; i < docImages.length; i++) {
+      const img = docImages[i];
+      // A lazy image outside the viewport never starts loading, and the
+      // full-page capture shows it as the browser would: not yet loaded.
+      if (doc === document && img.loading === "lazy") {
+        const r = img.getBoundingClientRect();
+        const visible = r.bottom > 0 && r.right > 0 && r.top < viewportHeight && r.left < viewportWidth;
+        if (!visible) continue;
+      }
+      if (!img.complete) {
+        return { settled: false, reason: `an image is still loading (${img.currentSrc || img.src || "no src"})` };
+      }
+      images.push(img);
+    }
+  }
+
+  const animations = document.getAnimations() as any[];
+  let running = 0;
+  for (const animation of animations) {
+    if (animation.playState !== "running") continue;
+    const timing = animation.effect?.getTiming?.();
+    if (timing && timing.iterations === Infinity) {
+      // `pause()` alone only schedules a pause for the next frame, during
+      // which the clock still advances; setting the time while that pause
+      // is pending completes it synchronously, at exactly this time.
+      animation.pause();
+      animation.currentTime = 0;
+      continue;
+    }
+    running++;
+  }
+  if (running > 0) {
+    return { settled: false, reason: `${running} animation(s) still running` };
+  }
+
+  // Finally: nothing may change for two frames. A MutationObserver catches a
+  // late commit or a text swap; the serialised story box catches a layout
+  // shift that touches no DOM node (an image taking its size, a font swap).
+  const rectBefore = measureStoryRect();
+  const layoutBefore = JSON.stringify(rectBefore) + "|" + document.documentElement.scrollWidth + "x" + document.documentElement.scrollHeight;
+  let mutations = 0;
+  const observer = new MutationObserver((records: any[]) => {
+    mutations += records.length;
+  });
+  observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+  observer.disconnect();
+  const rectAfter = measureStoryRect();
+  const layoutAfter = JSON.stringify(rectAfter) + "|" + document.documentElement.scrollWidth + "x" + document.documentElement.scrollHeight;
+
+  if (mutations > 0) {
+    return { settled: false, reason: `the DOM changed between two frames (${mutations} mutation(s))` };
+  }
+  if (layoutBefore !== layoutAfter) {
+    return { settled: false, reason: "the layout changed between two frames" };
+  }
+  if (!rectAfter || rectAfter.width <= 0 || rectAfter.height <= 0) {
+    return {
+      settled: false,
+      reason: "the story has rendered nothing with a measurable box, inline or portaled",
+    };
+  }
+
+  // Every image is complete; make sure its pixels are decoded too, so the
+  // screenshot does not catch a placeholder a frame before the bitmap lands.
+  const decodes: Promise<void>[] = [];
+  for (const img of images) {
+    if (img.naturalWidth > 0 && typeof img.decode === "function") {
+      decodes.push(img.decode().catch(() => {}));
+    }
+  }
+  await Promise.all(decodes);
+
+  return { settled: true };
+}
+
+// `measureStoryRect` is spliced into the same script because Playwright
+// serialises only the function it is handed, not what that function closes
+// over. Built once; the probe runs many times per story.
+const SETTLE_PROBE = `(() => { const measureStoryRect = ${measureStoryRect.toString()}; return (${checkSettled.toString()})(); })()`;
+
+/**
+ * Poll the in-page readiness contract until the story is settled, or fail
+ * loudly once `timeoutMs` has passed, naming the story and the condition it
+ * was still waiting on. Nothing here falls back to a blank or partial image.
+ */
+export async function waitForSettled(
+  page: Page,
+  storyKey: string,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastReason = "unknown";
+  for (;;) {
+    const verdict = (await page.evaluate(SETTLE_PROBE)) as SettleVerdict;
+    if (verdict.settled) return;
+    lastReason = verdict.reason ?? lastReason;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `${storyKey}: story did not settle within ${timeoutMs}ms: ${lastReason}`,
+      );
+    }
+    await page.waitForTimeout(SETTLE_POLL_MS);
+  }
+}
+
+export interface CaptureStoryOptions {
+  /** How long to wait for the marker to attach; a safety margin, see `MARKER_TIMEOUT_MS`. */
+  markerTimeoutMs?: number;
+  /** Cap on the two-identical-screenshots backstop, see `settleTimeout`. */
+  settleTimeoutMs?: number;
+}
+
 /**
  * Captures the story's own rendered box: the union of the bounding rects of
  * the marker's element children and of anything the story portaled next to
  * the app root, cropped out of a full-page screenshot.
+ *
+ * Two consecutive screenshots must be identical before one is accepted. The
+ * settle contract `renderStory` enforces covers everything the page can
+ * observe about itself; this is the backstop for what it cannot (a canvas
+ * being painted, a video frame, a compositor still catching up), at the price
+ * of one extra screenshot rather than seconds of sleep. A story still
+ * repainting at the cap fails, naming itself.
  *
  * Error paths in the generated entry (missing ?story=, bad key, story not
  * found, export not found, thrown render) leave no marker in the DOM and
@@ -209,15 +451,17 @@ function measureStoryRect(): StoryRect | null {
 export async function captureStoryOrPage(
   page: Page,
   storyKey: string = "<unknown story>",
-  timeoutMs: number = MARKER_TIMEOUT_MS,
+  options: CaptureStoryOptions = {},
 ): Promise<Buffer> {
+  const markerTimeoutMs = options.markerTimeoutMs ?? MARKER_TIMEOUT_MS;
+  const settleTimeoutMs = options.settleTimeoutMs ?? 10_000;
   const marker = page.locator("[data-storybun-story]");
 
   // `attached`, not `visible`: a story that only portals (a dialog) leaves
   // the marker itself with no box. Whether there is anything to capture is
   // decided by the measurement below, which also covers the portaled roots.
   try {
-    await marker.waitFor({ state: "attached", timeout: timeoutMs });
+    await marker.waitFor({ state: "attached", timeout: markerTimeoutMs });
   } catch (waitErr) {
     const isKnownErrorState = await page
       .evaluate(() => document.body.dataset.storybunError === "true")
@@ -231,67 +475,97 @@ export async function captureStoryOrPage(
     }
 
     console.error(
-      `[storybun] ${storyKey}: no story marker appeared within ${timeoutMs}ms and the entry did not report a known error state -- the story may be stuck rendering. Refusing to fall back to a full-page screenshot that could be mistaken for a valid baseline.`,
+      `[storybun] ${storyKey}: no story marker appeared within ${markerTimeoutMs}ms and the entry did not report a known error state -- the story may be stuck rendering. Refusing to fall back to a full-page screenshot that could be mistaken for a valid baseline.`,
     );
     throw waitErr;
   }
 
-  const rect = await page.evaluate(measureStoryRect);
-  if (!rect || rect.width <= 0 || rect.height <= 0) {
-    console.error(
-      `[storybun] ${storyKey}: the story rendered nothing with a measurable box, inline or portaled (e.g. it rendered null, or all of its root elements collapsed to zero size) -- refusing to produce a zero-size or viewport-sized image.`,
-    );
-    throw new Error(
-      `${storyKey}: story marker has no measurable content to capture`,
-    );
-  }
+  const deadline = Date.now() + settleTimeoutMs;
+  let previous: { rect: StoryRect; buffer: Buffer } | null = null;
+  for (;;) {
+    const rect = await page.evaluate(measureStoryRect);
+    if (!rect || rect.width <= 0 || rect.height <= 0) {
+      console.error(
+        `[storybun] ${storyKey}: the story rendered nothing with a measurable box, inline or portaled (e.g. it rendered null, or all of its root elements collapsed to zero size) -- refusing to produce a zero-size or viewport-sized image.`,
+      );
+      throw new Error(
+        `${storyKey}: story marker has no measurable content to capture`,
+      );
+    }
 
-  return Buffer.from(
-    await page.screenshot({ type: "png", fullPage: true, clip: rect }),
-  );
+    const buffer = Buffer.from(
+      await page.screenshot({ type: "png", fullPage: true, clip: rect }),
+    );
+    if (
+      previous &&
+      previous.rect.x === rect.x &&
+      previous.rect.y === rect.y &&
+      previous.rect.width === rect.width &&
+      previous.rect.height === rect.height &&
+      previous.buffer.equals(buffer)
+    ) {
+      return buffer;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `${storyKey}: two consecutive screenshots still differ after ${settleTimeoutMs}ms; the story keeps repainting`,
+      );
+    }
+    previous = { rect, buffer };
+  }
 }
 
 /**
- * A page pinned to a deterministic environment. Timezone and locale are fixed so
- * a developer's machine renders what CI renders, and a fixed time freezes
- * `Date.now()` and `new Date()` so components that read the wall clock -- relative
- * timestamps, elapsed-time tickers -- paint the same pixels on every run instead
- * of diffing against their own baseline. Timers keep running and only the reported
- * time is frozen, so nothing that awaits a timeout can deadlock.
+ * A browser context pinned to a deterministic environment. Timezone and
+ * locale are fixed so a developer's machine renders what CI renders, and a
+ * fixed time freezes `Date.now()` and `new Date()` so components that read the
+ * wall clock -- relative timestamps, elapsed-time tickers -- paint the same
+ * pixels on every run instead of diffing against their own baseline. Timers
+ * keep running and only the reported time is frozen, so nothing that awaits a
+ * timeout can deadlock.
  *
- * A page is good for exactly ONE navigation once the clock is frozen. On the
- * second and later `goto`, React still commits -- the DOM is fully populated --
- * but the compositor never paints, and `page.screenshot()` returns a blank canvas
- * while every wait in the loop reports success. Reusing a page therefore captures
- * the first story correctly and writes every later story on that page as an empty
- * image, with no error anywhere. `captureAll` takes a fresh page per story for
- * that reason; see its comment before changing it back.
+ * The clock is a context-level thing in Playwright (`page.clock` is sugar for
+ * `context.clock`), so it is frozen here, once per context, rather than per
+ * page: calling `setFixedTime` for every page while sibling pages in the same
+ * context close raced with "Target page, context or browser has been closed".
+ *
+ * Reduced motion is emulated for every capture. Motion libraries and consumer
+ * stylesheets with a `prefers-reduced-motion` branch then switch their own
+ * animation off, which is both faster and more faithful than a CSS override
+ * could be. Turning this on is a one-time re-baseline for a project whose
+ * components honour the preference.
  */
-async function createPage(
+async function createContext(
   browser: Browser,
   config: ResolvedSnapshotConfig,
   fixedTime: Date | null,
   mode: SnapshotMode | undefined,
-): Promise<Page> {
+): Promise<BrowserContext> {
   // `colorScheme` is left undefined when the mode does not set it: Playwright
   // then reports `light`, the same as before modes existed, so a mode that
   // only overrides the locale still renders the light theme.
-  const page = await browser.newPage({
+  const context = await browser.newContext({
     timezoneId: mode?.timezoneId ?? config.timezoneId,
     locale: mode?.locale ?? config.locale,
     colorScheme: mode?.colorScheme,
+    reducedMotion: "reduce",
   });
   if (fixedTime) {
-    await page.clock.setFixedTime(fixedTime);
+    await context.clock.setFixedTime(fixedTime);
   }
-  return page;
+  return context;
 }
 
 /**
- * Navigate to a story and wait until it has painted. Shared by the baseline run
- * and the single-story `shot` command so both observe the same readiness
- * contract -- fonts loaded, two animation frames elapsed, plus any configured
- * settle time -- and cannot drift into capturing at different moments.
+ * Navigate to a story and wait until it has settled. Shared by the baseline
+ * run and the single-story `shot` command so both observe the same readiness
+ * contract -- the entry's ready signal, then `checkSettled` until it holds or
+ * `settleTimeout` runs out -- and cannot drift into capturing at different
+ * moments.
+ *
+ * `load`, not `networkidle`: the latter cost a fixed 500ms of silence per
+ * capture and only covered images by accident. The settle contract waits for
+ * what the story actually shows.
  */
 export async function renderStory(
   page: Page,
@@ -301,7 +575,7 @@ export async function renderStory(
 ): Promise<void> {
   const url = `${serverUrl}/snapshot?story=${encodeURIComponent(storyKey)}`;
 
-  await page.goto(url, { waitUntil: "networkidle" });
+  await page.goto(url, { waitUntil: "load" });
 
   // Wait for the ready signal
   await page.waitForFunction(
@@ -309,10 +583,7 @@ export async function renderStory(
     { timeout: 30_000 },
   );
 
-  // Optional extra wait
-  if (config.waitTimeout > 0) {
-    await page.waitForTimeout(config.waitTimeout);
-  }
+  await waitForSettled(page, storyKey, config.settleTimeout);
 }
 
 export interface ShotOptions {
@@ -325,7 +596,7 @@ export interface ShotOptions {
 /**
  * Capture a single story to a PNG buffer, touching no baseline on disk.
  *
- * Goes through the same page setup, readiness wait and story-box crop as
+ * Goes through the same context setup, readiness wait and story-box crop as
  * `captureAll`, so the image is byte-for-byte what a baseline run would write
  * for this story in this mode and viewport -- not a viewport screenshot that
  * merely resembles one.
@@ -336,18 +607,21 @@ export async function captureOne(
   serverUrl: string,
   options: ShotOptions,
 ): Promise<Buffer> {
-  const page = await createPage(
+  const context = await createContext(
     browser,
     config,
     resolveFixedTime(config.clock),
     options.mode,
   );
   try {
+    const page = await context.newPage();
     await page.setViewportSize(options.viewport);
     await renderStory(page, serverUrl, options.storyKey, config);
-    return await captureStoryOrPage(page, options.storyKey);
+    return await captureStoryOrPage(page, options.storyKey, {
+      settleTimeoutMs: config.settleTimeout,
+    });
   } finally {
-    await page.close();
+    await context.close();
   }
 }
 
@@ -359,7 +633,7 @@ export async function captureAll(
   filter?: string,
   hooks: CaptureHooks = {},
 ): Promise<CaptureOutcome> {
-  const results: CaptureResult[] = [];
+  const results: CaptureRecord[] = [];
   const failures: CaptureFailure[] = [];
   const singleViewport = config.viewports.length === 1;
 
@@ -410,16 +684,21 @@ export async function captureAll(
     }
   }
 
-  // Process with a concurrency pool. Each worker opens a fresh page per story
-  // rather than holding one for its whole queue: a frozen clock survives exactly
-  // one navigation, and a reused page silently screenshots blank from the second
-  // story onwards (see `createPage`). Opening a page costs a fraction of the
-  // per-story wait, and a blank baseline is invisible in CI -- it matches the next
-  // equally blank run -- so the trade is not close.
   const concurrency = Math.min(config.concurrency, work.length || 1);
   const fixedTime = resolveFixedTime(config.clock);
 
   hooks.onStart?.(work.length);
+
+  // One context per mode, shared by every page captured in that mode, with
+  // the clock frozen once on it (see `createContext`). Each capture still
+  // gets a fresh page: a page reused across navigations under a frozen clock
+  // screenshots blank from the second story on, with every wait reporting
+  // success, and a blank baseline is invisible in CI because it matches the
+  // next equally blank run. Opening a page is cheap next to rendering one.
+  const contexts = new Map<string | undefined, BrowserContext>();
+  for (const [modeName, mode] of modeEntries) {
+    contexts.set(modeName, await createContext(browser, config, fixedTime, mode));
+  }
 
   let cursor = 0;
   let finished = 0;
@@ -429,11 +708,19 @@ export async function captureAll(
   // round trip and writes no comparison for the stories that did render. The
   // failure is kept, with its story key, and the run goes on; the caller
   // reports every failure together and fails the run on any.
-  async function captureStory(item: (typeof work)[number]): Promise<void> {
+  //
+  // The capture hook (compare, or write the baseline) runs here, inside the
+  // worker, as soon as the screenshot exists: the PNG is then dropped and
+  // only its dimensions kept, so memory holds `concurrency` images rather
+  // than the whole suite, and a comparison overlaps with the next render
+  // instead of running as a serial pass afterwards. A hook that throws
+  // fails this capture, not the run.
+  async function captureStory(item: WorkItem): Promise<void> {
     const storyKey = `${item.storyPath}--${item.exportName}`;
     const startedAt = performance.now();
     let error: Error | undefined;
-    const page = await createPage(browser, config, fixedTime, item.mode);
+    let outcome: string | undefined;
+    const page = await contexts.get(item.modeName)!.newPage();
 
     try {
       await page.setViewportSize({
@@ -443,14 +730,31 @@ export async function captureAll(
 
       await renderStory(page, serverUrl, storyKey, config);
 
-      const buffer = await captureStoryOrPage(page, storyKey);
+      const buffer = await captureStoryOrPage(page, storyKey, {
+        settleTimeoutMs: config.settleTimeout,
+      });
+      const dimensions = pngDimensions(buffer);
+      if (!dimensions) {
+        throw new Error(`${storyKey}: the screenshot is not a PNG`);
+      }
 
-      results.push({
+      const capture: CaptureResult = {
         storyKey,
         viewport: item.viewport,
         mode: item.modeName,
         buffer,
         outputPath: item.outputPath,
+        dimensions,
+      };
+      const note = await hooks.onCapture?.(capture);
+      if (typeof note === "string") outcome = note;
+
+      results.push({
+        storyKey,
+        viewport: item.viewport,
+        mode: item.modeName,
+        outputPath: item.outputPath,
+        dimensions,
       });
     } catch (err) {
       error = err instanceof Error ? err : new Error(String(err));
@@ -471,6 +775,7 @@ export async function captureAll(
         viewport: item.viewport,
         durationMs: performance.now() - startedAt,
         error,
+        outcome,
       });
     }
   }
@@ -481,9 +786,15 @@ export async function captureAll(
     }
   }
 
-  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  try {
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  } finally {
+    // `captureStory` closes its own page in a `finally`, so a story that
+    // throws does not leak one; the contexts are torn down here.
+    for (const context of contexts.values()) {
+      await context.close();
+    }
+  }
 
-  // No pool to tear down: `captureStory` closes its own page in a `finally`, so a
-  // story that throws does not leak one either.
   return { captures: results, failures };
 }

@@ -75,10 +75,31 @@ const storyPackages: Record<string, string> = {
 ${storyPkgMap}
 };
 ${wrappersDecl}
-// Disable animations for stable snapshots.
+// Zero out CSS animations and transitions. The browser context also emulates
+// \`prefers-reduced-motion: reduce\`, which is what JavaScript-driven motion
+// libraries and consumer stylesheets honour; this rule is the backstop for a
+// CSS animation that has no reduced-motion branch of its own, so that it
+// finishes instantly instead of keeping the story from ever settling.
 const style = document.createElement("style");
 style.textContent = "* { animation-duration: 0s !important; transition-duration: 0s !important; }";
 document.head.appendChild(style);
+
+// An iframe's \`load\` event does not bubble, but a capturing listener on the
+// document still sees it. The settle check consults this set so a frame that
+// has not finished loading -- a mail preview rendered into \`srcdoc\`, say --
+// holds the capture back; \`contentDocument.readyState\` alone would report the
+// initial about:blank document as complete while the real one is still on its
+// way. Installed before any story renders, so no frame's load is missed.
+const loadedFrames = new WeakSet<object>();
+(window as any).__storybunLoadedFrames = loadedFrames;
+document.addEventListener(
+  "load",
+  (event) => {
+    const target = event.target as any;
+    if (target && target.tagName === "IFRAME") loadedFrames.add(target);
+  },
+  true,
+);
 
 async function renderStory() {
   const params = new URLSearchParams(window.location.search);
@@ -209,7 +230,12 @@ export async function buildSnapshotEntry(
   return { buildDir, assets, html };
 }
 
-function generateSnapshotHtml(assets: Map<string, string>): string {
+// `data-storybun-snapshot` on <html> is the documented signal that a page is
+// a snapshot capture, present before any script runs, so a Wrapper that needs
+// to behave differently under capture (disable a live clock, seed a cache)
+// tests `document.documentElement.hasAttribute("data-storybun-snapshot")`
+// instead of guessing from the URL.
+export function generateSnapshotHtml(assets: Map<string, string>): string {
   const cssLinks: string[] = [];
   const jsScripts: string[] = [];
 
@@ -224,7 +250,7 @@ function generateSnapshotHtml(assets: Map<string, string>): string {
   }
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-storybun-snapshot>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">

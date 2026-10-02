@@ -180,8 +180,9 @@ this holds, and the screenshot is retaken until two in a row are identical:
 - the story has committed to the DOM with a measurable box (a story that
   renders `null` until its data arrives is waited for, not captured empty);
 - `window.__storybunPending` is zero (see below);
-- fonts are loaded, every `<img>` is complete and decoded, and every
-  `<iframe>` with a `src` or `srcdoc` has loaded its document;
+- every `<iframe>` with a `src` or `srcdoc` has loaded its document, and in
+  the page as well as in every same-origin framed document, fonts are loaded
+  and every `<img>` is complete and decoded;
 - no animation is running;
 - nothing in the DOM changed and the story's box did not move across two
   consecutive frames.

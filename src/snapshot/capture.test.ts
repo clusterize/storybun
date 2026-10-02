@@ -604,7 +604,7 @@ describe("readiness contract (real chromium)", () => {
   const mediaStory: StoryEntry = {
     path: "fixtures/media",
     filePath: join(fixturesDir, "media.stories.tsx"),
-    exports: ["Image", "SrcDocFrame", "SlowFrame"],
+    exports: ["Image", "SrcDocFrame", "SlowFrame", "FrameWithResources"],
     packageName: "test-pkg",
   };
   const motionStory: StoryEntry = {
@@ -620,6 +620,11 @@ describe("readiness contract (real chromium)", () => {
     packageName: "test-pkg",
   };
 
+  // Any real font file will do for `/slow-font.ttf`; it only has to arrive
+  // late. The fixture requests it after its frame's load event, which is
+  // exactly the gap under test.
+  const SLOW_FONT = new Bun.Glob("node_modules/playwright-core/**/*.ttf").scanSync(cwd).next().value as string;
+
   /** A solid red 120x80 PNG, what `/slow.png` serves. */
   function redPng(): Buffer {
     const image = new PNG({ width: 120, height: 80 });
@@ -633,6 +638,7 @@ describe("readiness contract (real chromium)", () => {
   }
 
   beforeAll(async () => {
+    expect(SLOW_FONT).toBeDefined();
     const build = await buildSnapshotEntry(
       [asyncStory, mediaStory, motionStory, clockStory],
       testPackages(),
@@ -651,6 +657,10 @@ describe("readiness contract (real chromium)", () => {
         if (url.pathname === "/slow.png") {
           await Bun.sleep(300);
           return new Response(red, { headers: { "Content-Type": "image/png" } });
+        }
+        if (url.pathname === "/slow-font.ttf") {
+          await Bun.sleep(400);
+          return new Response(Bun.file(SLOW_FONT), { headers: { "Content-Type": "font/ttf" } });
         }
         if (url.pathname === "/slow.html") {
           await Bun.sleep(300);
@@ -750,6 +760,28 @@ describe("readiness contract (real chromium)", () => {
     const buffer = await captureSingle(mediaStory, "SlowFrame");
     expect(pngDimensions(buffer)).toEqual({ width: 200, height: 100 });
     expect(pixelAt(buffer, 100, 50)).toEqual([255, 0, 255, 255]);
+  }, 20_000);
+
+  test("waits for the fonts and images of a framed document, which its load event does not", async () => {
+    const page: Page = await browser.newPage();
+    try {
+      await page.setViewportSize({ width: 800, height: 600 });
+      await renderStory(page, serverUrl, "fixtures/media--FrameWithResources", snapshotConfig());
+      const inner = await page.evaluate(() => {
+        const doc = document.querySelector("iframe").contentDocument;
+        return {
+          fonts: doc.fonts.status,
+          loadedFaces: [...doc.fonts].filter((f: any) => f.status === "loaded").length,
+          imagesComplete: [...doc.images].every((i: any) => i.complete && i.naturalWidth > 0),
+        };
+      });
+      expect(inner).toEqual({ fonts: "loaded", loadedFaces: 1, imagesComplete: true });
+      const buffer = await captureStoryOrPage(page, "fixtures/media--FrameWithResources");
+      // The framed image sits below one 24px line of text; the pixel must be red.
+      expect(pixelAt(buffer, 60, 100)).toEqual([255, 0, 0, 255]);
+    } finally {
+      await page.close();
+    }
   }, 20_000);
 
   test("waits for a finite Web Animations API animation to finish", async () => {

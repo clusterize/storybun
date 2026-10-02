@@ -222,7 +222,9 @@ interface SettleVerdict {
 // - `window.__storybunPending`, a counter (or a function returning one) the
 //   host Wrapper may drive from its data layer, must be zero -- the only
 //   signal that knows about a re-render that has not happened yet;
-// - fonts loaded, every image complete, every framed document loaded;
+// - fonts loaded and every image complete, in the page and in every
+//   same-origin framed document (an iframe's `load` does not wait for the
+//   fonts its document uses);
 // - no animation running: with reduced motion emulated and CSS durations
 //   zeroed that is almost always true at once; a finite animation that is
 //   not is simply waited for, and one that would never end (infinite
@@ -252,46 +254,69 @@ async function checkSettled(): Promise<SettleVerdict> {
     };
   }
 
-  if (document.fonts.status === "loading") {
-    return { settled: false, reason: "fonts are still loading" };
-  }
+  // Every document the story shows: the page itself plus every same-origin
+  // framed document under it, recursively. A mail preview rendered into
+  // `srcdoc` loads its own web fonts and images, and an iframe's `load`
+  // event does not wait for fonts: the frame reports loaded while its text
+  // still sits in the fallback face, and a capture taken then shifts by a
+  // pixel against one taken a second later. So fonts and images are checked
+  // in each document, not only the top one.
+  const documents: any[] = [];
+  const loadedFrames = window.__storybunLoadedFrames;
+  const collect = (doc: any): SettleVerdict | null => {
+    documents.push(doc);
+    const frames = doc.querySelectorAll("iframe") as ArrayLike<any>;
+    for (let i = 0; i < frames.length; i++) {
+      const frame = frames[i];
+      const src = frame.getAttribute("src");
+      const hasSource = (src !== null && src !== "" && src !== "about:blank") || frame.hasAttribute("srcdoc");
+      if (!hasSource) continue;
+      if (doc === document && loadedFrames && !loadedFrames.has(frame)) {
+        return { settled: false, reason: `an iframe has not fired load yet (${src ?? "srcdoc"})` };
+      }
+      // A cross-origin document is opaque; the load event above is all there
+      // is. A same-origin one must also have left the initial about:blank
+      // behind and finished parsing, and is then checked like the page.
+      let inner: any = null;
+      try {
+        inner = frame.contentDocument;
+      } catch {}
+      if (!inner) continue;
+      if (inner.URL === "about:blank" || inner.readyState !== "complete") {
+        return { settled: false, reason: `an iframe document is still loading (${src ?? "srcdoc"})` };
+      }
+      const nested = collect(inner);
+      if (nested) return nested;
+    }
+    return null;
+  };
+  const framePending = collect(document);
+  if (framePending) return framePending;
 
-  const images = document.images as ArrayLike<any>;
   const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
-  for (let i = 0; i < images.length; i++) {
-    const img = images[i];
-    // A lazy image outside the viewport never starts loading, and the
-    // full-page capture shows it as the browser would: not yet loaded.
-    if (img.loading === "lazy") {
-      const r = img.getBoundingClientRect();
-      const visible = r.bottom > 0 && r.right > 0 && r.top < viewportHeight && r.left < viewportWidth;
-      if (!visible) continue;
+  const images: any[] = [];
+  for (const doc of documents) {
+    if (doc.fonts && doc.fonts.status === "loading") {
+      return {
+        settled: false,
+        reason: doc === document ? "fonts are still loading" : "fonts in an iframe are still loading",
+      };
     }
-    if (!img.complete) {
-      return { settled: false, reason: `an image is still loading (${img.currentSrc || img.src || "no src"})` };
-    }
-  }
-
-  const frames = document.querySelectorAll("iframe") as ArrayLike<any>;
-  const loadedFrames = window.__storybunLoadedFrames;
-  for (let i = 0; i < frames.length; i++) {
-    const frame = frames[i];
-    const src = frame.getAttribute("src");
-    const hasSource = (src !== null && src !== "" && src !== "about:blank") || frame.hasAttribute("srcdoc");
-    if (!hasSource) continue;
-    if (loadedFrames && !loadedFrames.has(frame)) {
-      return { settled: false, reason: `an iframe has not fired load yet (${src ?? "srcdoc"})` };
-    }
-    // A cross-origin document is opaque; the load event above is all there
-    // is. A same-origin one must also have left the initial about:blank
-    // behind and finished parsing.
-    let doc: any = null;
-    try {
-      doc = frame.contentDocument;
-    } catch {}
-    if (doc && (doc.URL === "about:blank" || doc.readyState !== "complete")) {
-      return { settled: false, reason: `an iframe document is still loading (${src ?? "srcdoc"})` };
+    const docImages = doc.images as ArrayLike<any>;
+    for (let i = 0; i < docImages.length; i++) {
+      const img = docImages[i];
+      // A lazy image outside the viewport never starts loading, and the
+      // full-page capture shows it as the browser would: not yet loaded.
+      if (doc === document && img.loading === "lazy") {
+        const r = img.getBoundingClientRect();
+        const visible = r.bottom > 0 && r.right > 0 && r.top < viewportHeight && r.left < viewportWidth;
+        if (!visible) continue;
+      }
+      if (!img.complete) {
+        return { settled: false, reason: `an image is still loading (${img.currentSrc || img.src || "no src"})` };
+      }
+      images.push(img);
     }
   }
 
@@ -301,8 +326,11 @@ async function checkSettled(): Promise<SettleVerdict> {
     if (animation.playState !== "running") continue;
     const timing = animation.effect?.getTiming?.();
     if (timing && timing.iterations === Infinity) {
-      animation.currentTime = 0;
+      // `pause()` alone only schedules a pause for the next frame, during
+      // which the clock still advances; setting the time while that pause
+      // is pending completes it synchronously, at exactly this time.
       animation.pause();
+      animation.currentTime = 0;
       continue;
     }
     running++;
@@ -346,9 +374,8 @@ async function checkSettled(): Promise<SettleVerdict> {
   // Every image is complete; make sure its pixels are decoded too, so the
   // screenshot does not catch a placeholder a frame before the bitmap lands.
   const decodes: Promise<void>[] = [];
-  for (let i = 0; i < images.length; i++) {
-    const img = images[i];
-    if (img.complete && img.naturalWidth > 0 && typeof img.decode === "function") {
+  for (const img of images) {
+    if (img.naturalWidth > 0 && typeof img.decode === "function") {
       decodes.push(img.decode().catch(() => {}));
     }
   }

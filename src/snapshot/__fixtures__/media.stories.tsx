@@ -20,3 +20,22 @@ export const SrcDocFrame = () => (
 export const SlowFrame = () => (
   <iframe src="/slow.html" style={{ width: 200, height: 100, border: 0, display: "block" }} />
 );
+
+/**
+ * A framed document with its own web font and image, as a mail preview has.
+ * The font is applied once the framed document has loaded, as a lazily
+ * requested subset or a late stylesheet does, so the frame's `load` event
+ * has fired while the font is still on its way; the image, by contrast,
+ * holds `load` back.
+ */
+export const FrameWithResources = () => (
+  <iframe
+    srcDoc={`<!doctype html><style>
+      @font-face { font-family: Slow; src: url(/slow-font.ttf); }
+      body { margin: 0; background: #ffffff; font-family: monospace; font-size: 24px; }
+      body.late { font-family: Slow, monospace; }
+    </style><body>Framed text<br><img src="/slow.png" width="120" height="80">
+    <script>addEventListener("load", () => { document.body.className = "late"; });</script></body>`}
+    style={{ width: 200, height: 160, border: 0, display: "block" }}
+  />
+);

@@ -1,3 +1,5 @@
+import type { CaptureResult } from "./capture.ts";
+
 /** One capture finished, successfully or not; emitted by `captureAll`. */
 export interface CaptureProgress {
   /** 1-based count of finished captures, in completion order. */
@@ -8,11 +10,20 @@ export interface CaptureProgress {
   viewport: { width: number; height: number; name?: string };
   durationMs: number;
   error?: Error;
+  /** What `onCapture` said about this capture, e.g. "changed 3.2%"; printed after the time. */
+  outcome?: string;
 }
 
 export interface CaptureHooks {
   /** Called once with the number of captures the run will attempt. */
   onStart?: (total: number) => void;
+  /**
+   * Called inside the worker with each finished capture, pixels included,
+   * before the next story on that worker starts. This is where the capture
+   * is compared or written: the buffer is dropped once the hook returns.
+   * A returned string is shown on the progress line.
+   */
+  onCapture?: (capture: CaptureResult) => Promise<string | void> | string | void;
   onProgress?: (event: CaptureProgress) => void;
 }
 
@@ -37,9 +48,10 @@ export function captureLabel(
 }
 
 /**
- * `[  12/618] Components/Button--Primary [dark] 0.8s`, or with `✗` and the
- * first line of the error for a failed capture. The index is padded to the
- * width of the total so the lines line up.
+ * `[  12/618] Components/Button--Primary [dark] 0.8s`, followed by the
+ * capture's outcome when there is one to report (`+ new`, `changed 3.2%`),
+ * or with `✗` and the first line of the error for a failed capture. The
+ * index is padded to the width of the total so the lines line up.
  */
 export function formatProgress(event: CaptureProgress, singleViewport: boolean): string {
   const width = String(event.total).length;
@@ -50,7 +62,7 @@ export function formatProgress(event: CaptureProgress, singleViewport: boolean):
     const reason = event.error.message.split("\n")[0];
     return `${counter} ✗ ${label} ${time}: ${reason}`;
   }
-  return `${counter} ${label} ${time}`;
+  return event.outcome ? `${counter} ${label} ${time} ${event.outcome}` : `${counter} ${label} ${time}`;
 }
 
 export function formatPlan(

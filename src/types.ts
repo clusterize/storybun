@@ -37,7 +37,23 @@ export interface SnapshotConfig {
    */
   maxDiffPixels?: number;
   viewports?: { width: number; height: number; name?: string }[];
+  /**
+   * @deprecated Ignored. Captures used to sleep this long after the story
+   * signalled ready; the readiness contract now waits for the story to
+   * settle (see `settleTimeout`) and the sleep is gone. Remove it from your
+   * config; a non-zero value only prints a warning.
+   */
   waitTimeout?: number;
+  /**
+   * Hard cap in ms on how long a story may take to settle after its first
+   * paint (default: 10000). Settled means the story marker has a box, every
+   * image and same-origin iframe has loaded, fonts are ready, no animation
+   * is running, `window.__storybunPending` is zero, the DOM and layout held
+   * still across two frames and two consecutive screenshots are identical.
+   * A story still unsettled at the cap fails its capture with a message
+   * naming it; nothing falls back to a blank or partial image.
+   */
+  settleTimeout?: number;
   concurrency?: number;
   codeowners?: string[];
   /**
@@ -89,7 +105,7 @@ export interface ResolvedSnapshotConfig {
   threshold: number;
   maxDiffPixels: number;
   viewports: { width: number; height: number; name?: string }[];
-  waitTimeout: number;
+  settleTimeout: number;
   concurrency: number;
   codeowners: string[];
   clock: string | null;

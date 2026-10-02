@@ -28,6 +28,13 @@ describe("formatProgress", () => {
     expect(formatProgress({ ...event, viewport }, false)).toBe("[1/1] A--B @1280x720 10ms");
   });
 
+  test("appends the capture's outcome when the hook reported one", () => {
+    const event = { index: 1, total: 1, storyKey: "A--B", viewport, durationMs: 10 };
+    expect(formatProgress({ ...event, outcome: "changed 3.2%" }, true)).toBe("[1/1] A--B 10ms changed 3.2%");
+    expect(formatProgress({ ...event, outcome: "+ new" }, true)).toBe("[1/1] A--B 10ms + new");
+    expect(formatProgress({ ...event, outcome: undefined }, true)).toBe("[1/1] A--B 10ms");
+  });
+
   test("marks a failure and keeps the first line of its error", () => {
     const line = formatProgress(
       {

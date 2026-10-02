@@ -127,8 +127,10 @@ export default {
     // narrow or short PNG regardless of viewport.
     viewports: [{ width: 1280, height: 720 }],
 
-    // Extra settle time in ms after the story signals ready (default: 0)
-    waitTimeout: 0,
+    // Hard cap in ms on how long a story may take to settle (default: 10000).
+    // Not a sleep: a capture is taken as soon as the story is settled (see
+    // "Readiness" below) and fails loudly if it still is not at the cap.
+    settleTimeout: 10_000,
 
     // Pages captured in parallel (default: 4)
     concurrency: 4,
@@ -169,17 +171,71 @@ component polling on an interval simply re-renders the same output. Story
 fixtures should therefore express timestamps at or before the frozen instant, so
 that relative labels read as the past.
 
+### Readiness
+
+A capture is taken when the story is *settled*, not after a fixed delay. After
+the generated entry signals its first paint, the page is polled until all of
+this holds, and the screenshot is retaken until two in a row are identical:
+
+- the story has committed to the DOM with a measurable box (a story that
+  renders `null` until its data arrives is waited for, not captured empty);
+- `window.__storybunPending` is zero (see below);
+- fonts are loaded, every `<img>` is complete and decoded, and every
+  `<iframe>` with a `src` or `srcdoc` has loaded its document;
+- no animation is running;
+- nothing in the DOM changed and the story's box did not move across two
+  consecutive frames.
+
+A story that is still not settled after `settleTimeout` fails its capture with
+a message naming the story and the condition it was waiting on, and the run
+goes on with the next story. Nothing falls back to a blank or partial image.
+
+**`window.__storybunPending`.** The page cannot see a re-render that has not
+happened yet: a component that shows a skeleton for 300ms and then swaps in its
+data looks finished the whole time. Your Wrapper can tell storybun about work
+in flight by keeping `window.__storybunPending` at the number of pending
+operations, or by assigning it a function that returns that number. Capture
+waits while it is above zero. With TanStack Query, for example:
+
+```tsx
+window.__storybunPending = () => queryClient.isFetching() + queryClient.isMutating();
+```
+
+**Motion.** Every capture runs with `prefers-reduced-motion: reduce` emulated,
+so motion libraries and stylesheets that honour the preference switch their
+animation off on their own; CSS animations and transitions are additionally
+forced to zero duration as a backstop. A finite animation that still runs (a
+Web Animations API fade, say) is waited for. One that would never end -- a
+spinner with infinite iterations -- is paused at its first frame so the story
+can settle, and settles on the same frame every run. Enabling reduced motion
+is a one-time re-baseline for components that render differently under it.
+
+**Knowing you are under capture.** The snapshot document carries
+`data-storybun-snapshot` on `<html>` from before any script runs, so a Wrapper
+that must behave differently under capture checks
+`document.documentElement.hasAttribute("data-storybun-snapshot")` rather than
+guessing from the URL.
+
+**`waitTimeout`** is deprecated and ignored. It was a blind sleep after the
+first-paint signal; the readiness contract replaces it. A config that still
+sets it prints a warning once.
+
 ### Progress and timing
 
-The run logs each phase with its duration and one line per finished capture:
+The run logs each phase with its duration and one line per finished capture.
+Each capture is compared against its baseline (or, with `--update`, written)
+by the worker that took it, as soon as it exists, so there is no separate
+compare pass afterwards, only the captures in flight are held in memory, and a
+story's outcome shows on its own line:
 
 ```
 Capturing 618 snapshots (309 stories in 42 files × 2 modes) with concurrency 4
 [  1/618] Components/Button--Primary [light] 830ms
-[  2/618] ✗ Timeline--Empty [light] 1.2s: story marker has no measurable content to capture
+[  2/618] Components/Card--Wide [light] 910ms changed 3.2%
+[  3/618] Components/Card--Wide [dark] 870ms + new
+[  4/618] ✗ Timeline--Empty [light] 10.0s: story did not settle within 10000ms: the DOM changed between two frames (2 mutation(s))
 ...
-Captured in 1m32s
-Compared against baselines in 3.1s
+Captured and compared in 1m32s
 ```
 
 `--quiet` (`-q`) drops the per-capture lines; failures, phases and the summary

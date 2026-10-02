@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PNG } from "pngjs";
 import type { CaptureResult } from "./capture.ts";
-import { compareAll } from "./compare.ts";
+import { compareAll, describeCompareOutcome, updateBaseline } from "./compare.ts";
+import { pngDimensions } from "./png.ts";
 
 const viewport = { width: 800, height: 600 };
 
@@ -30,6 +31,7 @@ function capture(buffer: Buffer): CaptureResult {
     viewport,
     buffer,
     outputPath: join(outDir, "Components--Avatar--Group-light.png"),
+    dimensions: pngDimensions(buffer)!,
   };
 }
 
@@ -100,5 +102,30 @@ describe("compareAll", () => {
     const [result] = await compareAll([c], 0.1, 1_000_000);
 
     expect(result).toMatchObject({ status: "fail", diffPercent: 100 });
+  });
+});
+
+describe("updateBaseline", () => {
+  test("writes the capture as the baseline and clears stale actual/diff images", async () => {
+    const c = capture(png(4, 4));
+    await Bun.write(c.outputPath, png(4, 4, 3));
+    await Bun.write(c.outputPath.replace(/\.png$/, ".actual.png"), png(1, 1));
+    await Bun.write(c.outputPath.replace(/\.png$/, ".diff.png"), png(1, 1));
+
+    await updateBaseline(c);
+
+    expect(Buffer.from(await Bun.file(c.outputPath).arrayBuffer()).equals(c.buffer)).toBe(true);
+    expect(await exists(c.outputPath.replace(/\.png$/, ".actual.png"))).toBe(false);
+    expect(await exists(c.outputPath.replace(/\.png$/, ".diff.png"))).toBe(false);
+  });
+});
+
+describe("describeCompareOutcome", () => {
+  test("says nothing for a pass, names a new baseline and a change with its share", () => {
+    const base = { storyKey: "A--B", outputPath: "/out/A--B.png" };
+    expect(describeCompareOutcome({ ...base, status: "pass", diffPercent: 0 })).toBeUndefined();
+    expect(describeCompareOutcome({ ...base, status: "pass", diffPercent: 0.01 })).toBeUndefined();
+    expect(describeCompareOutcome({ ...base, status: "new", diffPercent: 0 })).toBe("+ new");
+    expect(describeCompareOutcome({ ...base, status: "fail", diffPercent: 3.21 })).toBe("changed 3.2%");
   });
 });

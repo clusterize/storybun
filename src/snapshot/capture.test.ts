@@ -5,12 +5,15 @@ import { chromium, type Browser, type Page } from "playwright";
 import { PNG } from "pngjs";
 import { buildSnapshotEntry } from "./entry.ts";
 import { startSnapshotServer } from "./server.ts";
-import { captureAll, captureOne, captureStoryOrPage } from "./capture.ts";
+import { captureAll, captureOne, captureStoryOrPage, renderStory } from "./capture.ts";
+import { FROZEN_AT } from "./__fixtures__/clock.stories.tsx";
 import type { PackageInfo, ResolvedConfig, ResolvedSnapshotConfig, StoryEntry } from "../types.ts";
+import type { CaptureHooks } from "./progress.ts";
 
-// tsconfig has no "dom" lib; declare the one global this file touches
-// rather than casting through `any` at every use.
+// tsconfig has no "dom" lib; declare the globals this file touches rather
+// than casting through `any` at every use.
 declare const window: any;
+declare const document: any;
 
 const cwd = join(import.meta.dir, "..", "..");
 const fixturesDir = join(import.meta.dir, "__fixtures__");
@@ -40,7 +43,7 @@ function testConfig(): ResolvedConfig {
       threshold: 0.1,
       maxDiffPixels: 0,
       viewports: [{ width: 800, height: 600 }],
-      waitTimeout: 0,
+      settleTimeout: 2_000,
       concurrency: 1,
       codeowners: [],
       clock: null,
@@ -134,6 +137,30 @@ function everyPixelIs(buffer: Buffer, [r, g, b, a]: [number, number, number, num
     }
   }
   return true;
+}
+
+// `captureAll` hands each capture's pixels to `onCapture` and keeps only
+// the dimensions; these tests look at pixels, so the hook collects them.
+async function captureAllWithBuffers(
+  b: Browser,
+  storyList: StoryEntry[],
+  config: ResolvedSnapshotConfig,
+  url: string,
+  filter?: string,
+  hooks: CaptureHooks = {},
+) {
+  const buffers = new Map<string, Buffer>();
+  const outcome = await captureAll(b, storyList, config, url, filter, {
+    ...hooks,
+    onCapture: async (c) => {
+      buffers.set(c.outputPath, c.buffer);
+      return hooks.onCapture?.(c);
+    },
+  });
+  return {
+    ...outcome,
+    captures: outcome.captures.map((c) => ({ ...c, buffer: buffers.get(c.outputPath)! })),
+  };
 }
 
 describe("captureStoryOrPage (real chromium)", () => {
@@ -246,7 +273,7 @@ describe("captureStoryOrPage (real chromium)", () => {
       await page.setContent(
         `<html><body><div data-storybun-story style="display:none">stuck</div></body></html>`,
       );
-      await expect(captureStoryOrPage(page, "stuck-story", 100)).rejects.toThrow();
+      await expect(captureStoryOrPage(page, "stuck-story", { markerTimeoutMs: 100 })).rejects.toThrow();
     } finally {
       await page.close();
     }
@@ -263,7 +290,7 @@ describe("captureStoryOrPage (real chromium)", () => {
       await page.setContent(
         `<html><body><div data-storybun-story style="width:100px;height:100px;"><span style="display:inline-block;width:0;height:0;"></span></div></body></html>`,
       );
-      await expect(captureStoryOrPage(page, "degenerate-story", 100)).rejects.toThrow();
+      await expect(captureStoryOrPage(page, "degenerate-story", { markerTimeoutMs: 100 })).rejects.toThrow();
     } finally {
       await page.close();
     }
@@ -298,7 +325,7 @@ describe("captureAll (real call site)", () => {
     const viewport = { width: 800, height: 600 };
     const config = snapshotConfig({ viewports: [viewport], concurrency: 1 });
 
-    const { captures: results } = await captureAll(browser, [stories[0]!], config, serverUrl);
+    const { captures: results } = await captureAllWithBuffers(browser, [stories[0]!], config, serverUrl);
 
     expect(results).toHaveLength(1);
     const { width, height } = pngDimensions(results[0]!.buffer);
@@ -311,7 +338,7 @@ describe("captureAll (real call site)", () => {
     const viewport = { width: 800, height: 600 };
     const config = snapshotConfig({ viewports: [viewport], concurrency: 2 });
 
-    const { captures: results } = await captureAll(browser, stories, config, serverUrl);
+    const { captures: results } = await captureAllWithBuffers(browser, stories, config, serverUrl);
 
     expect(results).toHaveLength(4);
     const keys = results.map((r) => r.storyKey).sort();
@@ -326,7 +353,7 @@ describe("captureAll (real call site)", () => {
   test("keeps capturing after a story that cannot be captured, and reports it", async () => {
     const config = snapshotConfig({ viewports: [{ width: 800, height: 600 }], concurrency: 1 });
 
-    const { captures, failures } = await captureAll(
+    const { captures, failures } = await captureAllWithBuffers(
       browser,
       [emptyStory, stories[0]!],
       config,
@@ -344,7 +371,7 @@ describe("captureAll (real call site)", () => {
     const totals: number[] = [];
     const events: { index: number; storyKey: string; failed: boolean; durationMs: number }[] = [];
 
-    await captureAll(browser, [emptyStory, stories[0]!, stories[1]!], config, serverUrl, undefined, {
+    await captureAllWithBuffers(browser, [emptyStory, stories[0]!, stories[1]!], config, serverUrl, undefined, {
       onStart: (total) => totals.push(total),
       onProgress: (e) => events.push({ index: e.index, storyKey: e.storyKey, failed: !!e.error, durationMs: e.durationMs }),
     });
@@ -364,7 +391,7 @@ describe("captureAll (real call site)", () => {
   test("includes content the story portaled to document.body, as an open menu or dialog is", async () => {
     const config = snapshotConfig({ viewports: [{ width: 800, height: 600 }], concurrency: 1 });
 
-    const { captures: results } = await captureAll(
+    const { captures: results } = await captureAllWithBuffers(
       browser,
       [portalStory],
       config,
@@ -386,7 +413,7 @@ describe("captureAll (real call site)", () => {
   test("includes a popup positioned inside a portal container that has no box itself", async () => {
     const config = snapshotConfig({ viewports: [{ width: 800, height: 600 }], concurrency: 1 });
 
-    const { captures } = await captureAll(browser, [portalStory], config, serverUrl, "NestedPortal");
+    const { captures } = await captureAllWithBuffers(browser, [portalStory], config, serverUrl, "NestedPortal");
 
     expect(captures).toHaveLength(1);
     const buffer = captures[0]!.buffer;
@@ -399,7 +426,7 @@ describe("captureAll (real call site)", () => {
   test("includes a fixed-position descendant of the story, as a toast is", async () => {
     const config = snapshotConfig({ viewports: [{ width: 800, height: 600 }], concurrency: 1 });
 
-    const { captures } = await captureAll(browser, [portalStory], config, serverUrl, "FixedBanner");
+    const { captures } = await captureAllWithBuffers(browser, [portalStory], config, serverUrl, "FixedBanner");
 
     expect(captures).toHaveLength(1);
     const buffer = captures[0]!.buffer;
@@ -413,7 +440,7 @@ describe("captureAll (real call site)", () => {
   test("includes an item positioned inside a fixed container that has no height, as a toast is", async () => {
     const config = snapshotConfig({ viewports: [{ width: 800, height: 600 }], concurrency: 1 });
 
-    const { captures } = await captureAll(browser, [portalStory], config, serverUrl, "FixedContainer");
+    const { captures } = await captureAllWithBuffers(browser, [portalStory], config, serverUrl, "FixedContainer");
 
     expect(captures).toHaveLength(1);
     const buffer = captures[0]!.buffer;
@@ -426,7 +453,7 @@ describe("captureAll (real call site)", () => {
   test("captures a story that renders only a portal, as a dialog story does", async () => {
     const config = snapshotConfig({ viewports: [{ width: 800, height: 600 }], concurrency: 1 });
 
-    const { captures: results } = await captureAll(
+    const { captures: results } = await captureAllWithBuffers(
       browser,
       [portalStory],
       config,
@@ -445,7 +472,7 @@ describe("captureAll (real call site)", () => {
   test("ignores a portaled element with no box", async () => {
     const config = snapshotConfig({ viewports: [{ width: 800, height: 600 }], concurrency: 1 });
 
-    const { captures: results } = await captureAll(
+    const { captures: results } = await captureAllWithBuffers(
       browser,
       [portalStory],
       config,
@@ -462,7 +489,7 @@ describe("captureAll (real call site)", () => {
   test("without modes, a story is captured once under the unsuffixed filename in the light scheme", async () => {
     const config = snapshotConfig({ outDir: "/out", concurrency: 1 });
 
-    const { captures: results } = await captureAll(browser, [schemeStory], config, serverUrl);
+    const { captures: results } = await captureAllWithBuffers(browser, [schemeStory], config, serverUrl);
 
     expect(results).toHaveLength(1);
     expect(results[0]!.mode).toBeUndefined();
@@ -477,7 +504,7 @@ describe("captureAll (real call site)", () => {
       modes: { light: { colorScheme: "light" }, dark: { colorScheme: "dark" } },
     });
 
-    const { captures: results } = await captureAll(browser, [schemeStory], config, serverUrl);
+    const { captures: results } = await captureAllWithBuffers(browser, [schemeStory], config, serverUrl);
 
     expect(results).toHaveLength(2);
     const byMode = new Map(results.map((r) => [r.mode, r]));
@@ -501,7 +528,7 @@ describe("captureAll (real call site)", () => {
       modes: { dark: { colorScheme: "dark" } },
     });
 
-    const { captures: results } = await captureAll(browser, [schemeStory], config, serverUrl);
+    const { captures: results } = await captureAllWithBuffers(browser, [schemeStory], config, serverUrl);
 
     expect(results.map((r) => r.outputPath).sort()).toEqual([
       "/out/fixtures--scheme--Swatch-400x600-dark.png",
@@ -509,12 +536,324 @@ describe("captureAll (real call site)", () => {
     ]);
   }, 20_000);
 
+  test("hands each capture's pixels to onCapture and keeps only its dimensions", async () => {
+    const config = snapshotConfig({ viewports: [{ width: 800, height: 600 }], concurrency: 1 });
+    const seen: { storyKey: string; bytes: number }[] = [];
+
+    const { captures } = await captureAll(browser, [stories[0]!], config, serverUrl, undefined, {
+      onCapture: (c) => {
+        seen.push({ storyKey: c.storyKey, bytes: c.buffer.length });
+      },
+    });
+
+    expect(seen).toEqual([{ storyKey: "fixtures/narrow--Badge", bytes: expect.any(Number) }]);
+    expect(seen[0]!.bytes).toBeGreaterThan(0);
+    expect(captures).toHaveLength(1);
+    expect(captures[0]!.dimensions).toEqual({ width: 120, height: 40 });
+    expect("buffer" in captures[0]!).toBe(false);
+  }, 20_000);
+
+  test("shows what onCapture returned on the progress line, and a throwing hook fails only its capture", async () => {
+    const config = snapshotConfig({ viewports: [{ width: 800, height: 600 }], concurrency: 1 });
+    const outcomes = new Map<string, string | undefined>();
+    const errors = new Map<string, string | undefined>();
+
+    const { captures, failures } = await captureAll(
+      browser,
+      [stories[0]!, stories[1]!],
+      config,
+      serverUrl,
+      undefined,
+      {
+        onCapture: async (c) => {
+          if (c.storyKey === "fixtures/tall--Stack") throw new Error("baseline is not a PNG");
+          return "+ new";
+        },
+        onProgress: (e) => {
+          outcomes.set(e.storyKey, e.outcome);
+          errors.set(e.storyKey, e.error?.message);
+        },
+      },
+    );
+
+    expect(captures.map((c) => c.storyKey)).toEqual(["fixtures/narrow--Badge"]);
+    expect(outcomes.get("fixtures/narrow--Badge")).toBe("+ new");
+    expect(failures.map((f) => f.storyKey)).toEqual(["fixtures/tall--Stack"]);
+    expect(errors.get("fixtures/tall--Stack")).toBe("baseline is not a PNG");
+  }, 30_000);
+
   test("rejects a mode name that cannot be part of a baseline filename", async () => {
     const config = snapshotConfig({ modes: { "dark/blue": { colorScheme: "dark" } } });
 
-    await expect(captureAll(browser, [schemeStory], config, serverUrl)).rejects.toThrow(
+    await expect(captureAllWithBuffers(browser, [schemeStory], config, serverUrl)).rejects.toThrow(
       /Invalid snapshot mode name/,
     );
+  }, 20_000);
+});
+
+describe("readiness contract (real chromium)", () => {
+  let serverUrl: string;
+  let stopServer: () => void;
+
+  const asyncStory: StoryEntry = {
+    path: "fixtures/async",
+    filePath: join(fixturesDir, "async.stories.tsx"),
+    exports: ["LateContent", "Skeleton", "PendingCounter", "LazyMount", "NeverSettles"],
+    packageName: "test-pkg",
+  };
+  const mediaStory: StoryEntry = {
+    path: "fixtures/media",
+    filePath: join(fixturesDir, "media.stories.tsx"),
+    exports: ["Image", "SrcDocFrame", "SlowFrame"],
+    packageName: "test-pkg",
+  };
+  const motionStory: StoryEntry = {
+    path: "fixtures/motion",
+    filePath: join(fixturesDir, "motion.stories.tsx"),
+    exports: ["FadeIn", "Spinner", "ReducedMotion", "SnapshotFlag"],
+    packageName: "test-pkg",
+  };
+  const clockStory: StoryEntry = {
+    path: "fixtures/clock",
+    filePath: join(fixturesDir, "clock.stories.tsx"),
+    exports: ["First", "Second"],
+    packageName: "test-pkg",
+  };
+
+  /** A solid red 120x80 PNG, what `/slow.png` serves. */
+  function redPng(): Buffer {
+    const image = new PNG({ width: 120, height: 80 });
+    for (let i = 0; i < 120 * 80; i++) {
+      image.data[i * 4] = 255;
+      image.data[i * 4 + 1] = 0;
+      image.data[i * 4 + 2] = 0;
+      image.data[i * 4 + 3] = 255;
+    }
+    return PNG.sync.write(image);
+  }
+
+  beforeAll(async () => {
+    const build = await buildSnapshotEntry(
+      [asyncStory, mediaStory, motionStory, clockStory],
+      testPackages(),
+      testConfig(),
+      cwd,
+    );
+    const inner = startSnapshotServer(build);
+    const red = redPng();
+    // Sits in front of the snapshot server to serve two deliberately slow
+    // assets, so an image and a framed document arrive well after the
+    // entry's ready signal. Everything else is passed through.
+    const proxy = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const url = new URL(req.url);
+        if (url.pathname === "/slow.png") {
+          await Bun.sleep(300);
+          return new Response(red, { headers: { "Content-Type": "image/png" } });
+        }
+        if (url.pathname === "/slow.html") {
+          await Bun.sleep(300);
+          return new Response(`<!doctype html><body style="margin:0;background:#ff00ff"></body>`, {
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          });
+        }
+        return fetch(`http://localhost:${inner.port}${url.pathname}${url.search}`);
+      },
+    });
+    serverUrl = `http://localhost:${proxy.port}`;
+    stopServer = () => {
+      proxy.stop();
+      inner.stop();
+    };
+  }, 20_000);
+
+  afterAll(() => {
+    stopServer();
+  }, 20_000);
+
+  function snapshotConfig(overrides: Partial<ResolvedSnapshotConfig> = {}): ResolvedSnapshotConfig {
+    return { ...testConfig().snapshot, viewports: [{ width: 800, height: 600 }], concurrency: 1, ...overrides };
+  }
+
+  async function captureSingle(story: StoryEntry, exportName: string, overrides: Partial<ResolvedSnapshotConfig> = {}) {
+    const { captures, failures } = await captureAllWithBuffers(
+      browser,
+      [{ ...story, exports: [exportName] }],
+      snapshotConfig(overrides),
+      serverUrl,
+    );
+    expect(failures).toEqual([]);
+    expect(captures).toHaveLength(1);
+    return captures[0]!.buffer;
+  }
+
+  test("waits for content that arrives after first paint instead of failing on an empty marker", async () => {
+    const buffer = await captureSingle(asyncStory, "LateContent");
+    expect(pngDimensions(buffer)).toEqual({ width: 200, height: 100 });
+    expect(pixelAt(buffer, 100, 50)).toEqual([0, 255, 0, 255]);
+  }, 20_000);
+
+  test("captures a skeleton that gives no pending signal as the skeleton -- the limit the counter exists for", async () => {
+    // A story that is quiet for two frames and only later swaps its skeleton
+    // for data looks settled to every check the page can make on itself. The
+    // settle contract is deliberately not a sleep, so this is captured as
+    // the skeleton; a Wrapper that reports its in-flight requests through
+    // `window.__storybunPending` is what makes the data render the baseline
+    // (see the PendingCounter test).
+    const buffer = await captureSingle(asyncStory, "Skeleton");
+    expect(pngDimensions(buffer)).toEqual({ width: 50, height: 20 });
+  }, 20_000);
+
+  test("holds the capture while window.__storybunPending is above zero", async () => {
+    // Same size from the first paint; only the counter knows a re-render is coming.
+    const buffer = await captureSingle(asyncStory, "PendingCounter");
+    expect(pixelAt(buffer, 100, 50)).toEqual([0, 255, 0, 255]);
+  }, 20_000);
+
+  test("waits for a lazily mounted component under a null Suspense fallback", async () => {
+    const buffer = await captureSingle(asyncStory, "LazyMount");
+    expect(pngDimensions(buffer)).toEqual({ width: 200, height: 100 });
+    expect(pixelAt(buffer, 100, 50)).toEqual([0, 255, 0, 255]);
+  }, 20_000);
+
+  test("the ready signal alone fires while an image is still loading", async () => {
+    // The gap the contract closes: with `load` plus the entry's ready flag,
+    // the image has not arrived. If this ever passes without the settle
+    // wait, the image test below proves nothing.
+    const page: Page = await browser.newPage();
+    try {
+      await page.goto(`${serverUrl}/snapshot?story=${encodeURIComponent("fixtures/media--Image")}`, {
+        waitUntil: "load",
+      });
+      await page.waitForFunction(() => window.__STORYBUN_READY__ === true, { timeout: 30_000 });
+      const complete = await page.evaluate(() => document.images[0].complete);
+      expect(complete).toBe(false);
+    } finally {
+      await page.close();
+    }
+  }, 20_000);
+
+  test("waits for every image to load and decode", async () => {
+    const buffer = await captureSingle(mediaStory, "Image");
+    expect(pngDimensions(buffer)).toEqual({ width: 120, height: 80 });
+    expect(pixelAt(buffer, 60, 40)).toEqual([255, 0, 0, 255]);
+  }, 20_000);
+
+  test("waits for a srcdoc iframe to render its document", async () => {
+    const buffer = await captureSingle(mediaStory, "SrcDocFrame");
+    expect(pngDimensions(buffer)).toEqual({ width: 200, height: 100 });
+    expect(pixelAt(buffer, 100, 50)).toEqual([0, 0, 255, 255]);
+  }, 20_000);
+
+  test("waits for an iframe that loads its document from the network", async () => {
+    const buffer = await captureSingle(mediaStory, "SlowFrame");
+    expect(pngDimensions(buffer)).toEqual({ width: 200, height: 100 });
+    expect(pixelAt(buffer, 100, 50)).toEqual([255, 0, 255, 255]);
+  }, 20_000);
+
+  test("waits for a finite Web Animations API animation to finish", async () => {
+    const buffer = await captureSingle(motionStory, "FadeIn");
+    // Fully opaque green: not the transparent first frame, not a blend.
+    expect(pixelAt(buffer, 100, 50)).toEqual([0, 255, 0, 255]);
+  }, 20_000);
+
+  test("pauses an animation that would never end at its first frame", async () => {
+    const buffer = await captureSingle(motionStory, "Spinner");
+    expect(pngDimensions(buffer)).toEqual({ width: 100, height: 100 });
+    expect(pixelAt(buffer, 25, 50)).toEqual([255, 0, 0, 255]);
+    expect(pixelAt(buffer, 75, 50)).toEqual([0, 0, 255, 255]);
+  }, 20_000);
+
+  test("emulates prefers-reduced-motion: reduce", async () => {
+    const buffer = await captureSingle(motionStory, "ReducedMotion");
+    expect(pixelAt(buffer, 50, 30)).toEqual([0, 255, 0, 255]);
+  }, 20_000);
+
+  test("flags the document with data-storybun-snapshot", async () => {
+    const buffer = await captureSingle(motionStory, "SnapshotFlag");
+    expect(pixelAt(buffer, 50, 30)).toEqual([0, 255, 0, 255]);
+  }, 20_000);
+
+  test("fails a story that never settles, naming it and what it was waiting on", async () => {
+    const { captures, failures } = await captureAll(
+      browser,
+      [{ ...asyncStory, exports: ["NeverSettles"] }],
+      snapshotConfig({ settleTimeout: 1_000 }),
+      serverUrl,
+    );
+    expect(captures).toEqual([]);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]!.error.message).toMatch(
+      /^fixtures\/async--NeverSettles: story did not settle within 1000ms: the DOM changed between two frames/,
+    );
+  }, 20_000);
+
+  test("keeps the clock frozen for every page of a context, not only the first", async () => {
+    const { captures, failures } = await captureAllWithBuffers(
+      browser,
+      [clockStory],
+      snapshotConfig({ clock: FROZEN_AT }),
+      serverUrl,
+    );
+    expect(failures).toEqual([]);
+    expect(captures.map((c) => c.storyKey)).toEqual(["fixtures/clock--First", "fixtures/clock--Second"]);
+    for (const c of captures) {
+      expect(pngDimensions(c.buffer)).toEqual({ width: 100, height: 60 });
+      expect(pixelAt(c.buffer, 50, 30)).toEqual([0, 255, 0, 255]);
+    }
+  }, 20_000);
+
+  // Pages whose HTML the test writes itself, served through a route so that
+  // `renderStory` drives them exactly as it drives a built story.
+  async function renderHandBuilt(storyKey: string, html: string): Promise<Buffer> {
+    const page: Page = await browser.newPage();
+    try {
+      await page.route(
+        (url) => url.pathname === "/snapshot" && url.searchParams.get("story") === storyKey,
+        (route) => route.fulfill({ contentType: "text/html", body: html }),
+      );
+      await page.setViewportSize({ width: 800, height: 600 });
+      await renderStory(page, serverUrl, storyKey, snapshotConfig());
+      return await captureStoryOrPage(page, storyKey);
+    } finally {
+      await page.close();
+    }
+  }
+
+  test("waits for the marker when the ready flag fires before React has committed", async () => {
+    const buffer = await renderHandBuilt(
+      "race--Late",
+      `<!doctype html><html data-storybun-snapshot><body><div id="root"></div><script>
+        window.__STORYBUN_READY__ = true;
+        setTimeout(() => {
+          const marker = document.createElement("div");
+          marker.setAttribute("data-storybun-story", "");
+          marker.innerHTML = '<div style="width:200px;height:100px;background:#00ff00"></div>';
+          document.getElementById("root").appendChild(marker);
+        }, 300);
+      </script></body></html>`,
+    );
+    expect(pngDimensions(buffer)).toEqual({ width: 200, height: 100 });
+    expect(pixelAt(buffer, 100, 50)).toEqual([0, 255, 0, 255]);
+  }, 20_000);
+
+  test("accepts a function as window.__storybunPending", async () => {
+    const buffer = await renderHandBuilt(
+      "pending--Function",
+      `<!doctype html><html data-storybun-snapshot><body><div id="root">
+        <div data-storybun-story=""><div id="box" style="width:200px;height:100px;background:#ff0000"></div></div>
+      </div><script>
+        let inFlight = 1;
+        window.__storybunPending = () => inFlight;
+        window.__STORYBUN_READY__ = true;
+        setTimeout(() => {
+          document.getElementById("box").style.background = "#00ff00";
+          inFlight = 0;
+        }, 300);
+      </script></body></html>`,
+    );
+    expect(pixelAt(buffer, 100, 50)).toEqual([0, 255, 0, 255]);
   }, 20_000);
 });
 

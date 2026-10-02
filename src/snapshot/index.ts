@@ -5,7 +5,7 @@ import { scanStories } from "../scanner.ts";
 import { buildSnapshotEntry } from "./entry.ts";
 import { startSnapshotServer } from "./server.ts";
 import { captureAll } from "./capture.ts";
-import { compareAll, pruneBaselines, updateBaselines } from "./compare.ts";
+import { compareCapture, describeCompareOutcome, pruneBaselines, updateBaseline, type CompareResult } from "./compare.ts";
 import { printReport, printUpdateReport, printFailures, printPruned, getExitCode } from "./report.ts";
 import { updateCodeowners } from "./codeowners.ts";
 import { loadPlaywright } from "./playwright.ts";
@@ -78,25 +78,45 @@ export async function runSnapshots(
     try {
       const singleViewport = snapshotConfig.viewports.length === 1;
       const exportCount = stories.reduce((n, s) => n + s.exports.length, 0);
-      const { captures, failures } = await timed("Captured", () =>
-        captureAll(browser, stories, resolvedSnapshotConfig, serverUrl, options.filter, {
-          onStart: (total) => {
-            console.log(
-              formatPlan(
-                stories.length,
-                exportCount,
-                snapshotConfig.viewports.length,
-                Object.keys(snapshotConfig.modes).length,
-                total,
-                Math.min(snapshotConfig.concurrency, total || 1),
-              ) + (options.filter ? ` (filter: ${options.filter})` : ""),
-            );
-          },
-          onProgress: (event) => {
-            // A failure is always worth a line; the rest only when asked.
-            if (!options.quiet || event.error) console.log(formatProgress(event, singleViewport));
-          },
-        }),
+
+      // Each capture is compared (or, on `--update`, written) by the worker
+      // that took it, as soon as it exists: no separate pass afterwards, and
+      // no PNG held in memory past its own comparison.
+      const compared: CompareResult[] = [];
+      const { captures, failures } = await timed(
+        options.update ? "Captured and updated" : "Captured and compared",
+        () =>
+          captureAll(browser, stories, resolvedSnapshotConfig, serverUrl, options.filter, {
+            onCapture: async (capture) => {
+              if (options.update) {
+                await updateBaseline(capture);
+                return;
+              }
+              const result = await compareCapture(
+                capture,
+                snapshotConfig.threshold,
+                snapshotConfig.maxDiffPixels,
+              );
+              compared.push(result);
+              return describeCompareOutcome(result);
+            },
+            onStart: (total) => {
+              console.log(
+                formatPlan(
+                  stories.length,
+                  exportCount,
+                  snapshotConfig.viewports.length,
+                  Object.keys(snapshotConfig.modes).length,
+                  total,
+                  Math.min(snapshotConfig.concurrency, total || 1),
+                ) + (options.filter ? ` (filter: ${options.filter})` : ""),
+              );
+            },
+            onProgress: (event) => {
+              // A failure is always worth a line; the rest only when asked.
+              if (!options.quiet || event.error) console.log(formatProgress(event, singleViewport));
+            },
+          }),
       );
 
       if (captures.length === 0 && failures.length === 0) {
@@ -104,15 +124,10 @@ export async function runSnapshots(
         return 0;
       }
 
-      let compared: Awaited<ReturnType<typeof compareAll>> | null = null;
       if (options.update) {
-        const count = await timed("Updated baselines", () => updateBaselines(captures));
-        printUpdateReport(count);
+        printUpdateReport(captures.length);
         exitCode = 0;
       } else {
-        compared = await timed("Compared against baselines", () =>
-          compareAll(captures, snapshotConfig.threshold, snapshotConfig.maxDiffPixels),
-        );
         printReport(compared);
         exitCode = getExitCode(compared);
       }
@@ -141,7 +156,7 @@ export async function runSnapshots(
       if (options.json !== undefined || options.html !== undefined) {
         const report = await buildReport({
           captures,
-          compared,
+          compared: options.update ? null : compared,
           failures,
           removed,
           pruned: prune,

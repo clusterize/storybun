@@ -1,7 +1,11 @@
 import { readdir } from "node:fs/promises";
 import { basename, join } from "path";
 import type { ResolvedSnapshotConfig } from "../types.ts";
-import type { CaptureFailure, CaptureResult } from "./capture.ts";
+import type { CaptureFailure, CaptureRecord } from "./capture.ts";
+import { pngDimensions } from "./png.ts";
+
+// Re-exported for callers that read PNG headers through this module.
+export { pngDimensions } from "./png.ts";
 import type { CompareResult } from "./compare.ts";
 
 /**
@@ -94,7 +98,7 @@ export interface SnapshotReport {
 }
 
 export interface BuildReportInput {
-  captures: CaptureResult[];
+  captures: CaptureRecord[];
   /** Comparison results, or null on an `--update` run. */
   compared: CompareResult[] | null;
   failures: CaptureFailure[];
@@ -115,13 +119,6 @@ export interface BuildReportInput {
   now?: Date;
 }
 
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-
-/** Width and height from a PNG's IHDR chunk, without decoding the image. */
-export function pngDimensions(buffer: Buffer): ReportDimensions | null {
-  if (buffer.length < 24 || !buffer.subarray(0, 8).equals(PNG_SIGNATURE)) return null;
-  return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
-}
 
 async function fileDimensions(path: string): Promise<ReportDimensions | null> {
   const file = Bun.file(path);
@@ -193,7 +190,7 @@ export async function buildReport(input: BuildReportInput): Promise<SnapshotRepo
 
   for (const capture of input.captures) {
     const baselineFile = basename(capture.outputPath);
-    const actualDims = pngDimensions(capture.buffer);
+    const actualDims = capture.dimensions;
     const base = {
       storyKey: capture.storyKey,
       mode: capture.mode ?? null,

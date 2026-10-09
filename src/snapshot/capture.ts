@@ -108,6 +108,64 @@ interface StoryRect {
   height: number;
 }
 
+// `page.screenshot({ fullPage: true, clip })` returns the intersection of
+// `clip` with the page's raster bounds -- silently. A story whose measured
+// box extends past the rasterised page (a `position: fixed` element pinned
+// past the bottom or right edge of a page whose in-flow content does not
+// reach that far) then gets a baseline smaller than the story, and every
+// later run crops identically, so the truncated capture matches its own
+// truncated baseline forever. `Page.captureScreenshot` with
+// `captureBeyondViewport: true` honours the requested rectangle instead.
+//
+// Ordinary in-flow content is unaffected either way: it enlarges the
+// document's scroll size, so the raster already covers it, and the two
+// capture paths are byte-identical for it (measured across several layouts
+// in `scratch/clip/probe.ts`). Only content that does not enlarge the
+// document -- fixed and portaled roots -- can overhang the raster, which is
+// why this was invisible until the fixed/portaled-content measurement
+// (`measureStoryRect` above) started reporting boxes past the viewport.
+//
+// CDP sessions only exist on Chromium; Firefox and WebKit have no
+// `newCDPSession`, so they fall back to the old clipped screenshot. The
+// dimension assertion below still applies to that fallback, so a capture
+// that comes back truncated on a non-Chromium browser throws instead of
+// silently becoming a baseline -- the same "loud, not silent" rule this file
+// already applies to the marker/box fallbacks above.
+export async function captureClippedRegion(
+  page: Page,
+  rect: StoryRect,
+  storyKey: string,
+): Promise<Buffer> {
+  let buffer: Buffer;
+  try {
+    const session = await page.context().newCDPSession(page);
+    try {
+      const result = (await session.send("Page.captureScreenshot" as never, {
+        format: "png",
+        captureBeyondViewport: true,
+        fromSurface: true,
+        clip: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, scale: 1 },
+      } as never)) as { data: string };
+      buffer = Buffer.from(result.data, "base64");
+    } finally {
+      await session.detach();
+    }
+  } catch (err) {
+    if (!(err instanceof Error) || !err.message.includes("CDP session is only available in Chromium")) {
+      throw err;
+    }
+    buffer = Buffer.from(await page.screenshot({ type: "png", fullPage: true, clip: rect }));
+  }
+
+  const dimensions = pngDimensions(buffer);
+  if (!dimensions || dimensions.width !== rect.width || dimensions.height !== rect.height) {
+    throw new Error(
+      `${storyKey}: capture came back ${dimensions ? `${dimensions.width}x${dimensions.height}` : "not a PNG"}, smaller than the requested ${rect.width}x${rect.height} -- the page raster did not cover the full clip region`,
+    );
+  }
+  return buffer;
+}
+
 // The marker div is block-level and always fills its container, so its own
 // box tells us nothing about the story's size. What we actually want is the
 // box the story itself occupies: the union of its rendered root(s) -- the
@@ -493,9 +551,7 @@ export async function captureStoryOrPage(
       );
     }
 
-    const buffer = Buffer.from(
-      await page.screenshot({ type: "png", fullPage: true, clip: rect }),
-    );
+    const buffer = await captureClippedRegion(page, rect, storyKey);
     if (
       previous &&
       previous.rect.x === rect.x &&

@@ -5,7 +5,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import { PNG } from "pngjs";
 import { buildSnapshotEntry } from "./entry.ts";
 import { startSnapshotServer } from "./server.ts";
-import { captureAll, captureOne, captureStoryOrPage, renderStory } from "./capture.ts";
+import { captureAll, captureClippedRegion, captureOne, captureStoryOrPage, renderStory } from "./capture.ts";
 import { FROZEN_AT } from "./__fixtures__/clock.stories.tsx";
 import type { PackageInfo, ResolvedConfig, ResolvedSnapshotConfig, StoryEntry } from "../types.ts";
 import type { CaptureHooks } from "./progress.ts";
@@ -110,6 +110,13 @@ const schemeStory: StoryEntry = {
   path: "fixtures/scheme",
   filePath: join(fixturesDir, "scheme.stories.tsx"),
   exports: ["Swatch"],
+  packageName: "test-pkg",
+};
+
+const overhangStory: StoryEntry = {
+  path: "fixtures/overhang",
+  filePath: join(fixturesDir, "overhang.stories.tsx"),
+  exports: ["BottomOverhang", "RightOverhang"],
   packageName: "test-pkg",
 };
 
@@ -279,6 +286,72 @@ describe("captureStoryOrPage (real chromium)", () => {
     }
   }, 10_000);
 
+  test("is byte-identical to a plain clipped screenshot for an ordinary in-flow story (no re-baseline)", async () => {
+    const viewport = { width: 800, height: 600 };
+    const page: Page = await browser.newPage();
+    try {
+      await page.setViewportSize(viewport);
+      await page.goto(`${serverUrl}/snapshot?story=${encodeURIComponent("fixtures/narrow--Badge")}`, {
+        waitUntil: "networkidle",
+      });
+      await page.waitForFunction(() => window.__STORYBUN_READY__ === true, { timeout: 30_000 });
+
+      const rect = await page.evaluate(() => {
+        const el = document.querySelector("[data-storybun-story]").children[0];
+        const r = el.getBoundingClientRect();
+        return {
+          x: Math.floor(r.left + window.scrollX),
+          y: Math.floor(r.top + window.scrollY),
+          width: Math.ceil(r.width),
+          height: Math.ceil(r.height),
+        };
+      });
+
+      const fixed = await captureStoryOrPage(page, "fixtures/narrow--Badge");
+      const plain = Buffer.from(await page.screenshot({ type: "png", fullPage: true, clip: rect }));
+
+      // In-flow content enlarges the document's scroll size, so the raster
+      // already covers it and the CDP capture path must produce the exact
+      // same bytes as the plain clipped screenshot it replaces -- otherwise
+      // this fix would re-baseline every ordinary story, not just the
+      // overhanging ones.
+      expect(fixed.equals(plain)).toBe(true);
+    } finally {
+      await page.close();
+    }
+  }, 15_000);
+
+  test("falls back to a plain clipped screenshot when the browser has no CDP session, and the dimension assertion still catches the fallback's truncation", async () => {
+    const page: Page = await browser.newPage();
+    try {
+      await page.setViewportSize({ width: 100, height: 200 });
+      await page.setContent(
+        `<html><body style="margin:0;background:#fff"><div style="position:fixed;left:0;top:150px;width:100px;height:100px;background:#ef4444"></div></body></html>`,
+      );
+      const rect = { x: 0, y: 150, width: 100, height: 100 };
+
+      // Firefox and WebKit have no CDP session; Playwright's own
+      // `newCDPSession` throws this exact message there (see
+      // `browserContextDispatcher.js`). Simulate it on Chromium rather than
+      // launching a second browser -- two sequential `chromium.launch()`
+      // calls in this process crash the host this file runs on.
+      const context = page.context() as any;
+      const original = context.newCDPSession.bind(context);
+      context.newCDPSession = async () => {
+        throw new Error("CDP session is only available in Chromium");
+      };
+      try {
+        await expect(captureClippedRegion(page, rect, "fixtures/fake--Overhang")).rejects.toThrow(
+          "fixtures/fake--Overhang: capture came back 100x50, smaller than the requested 100x100",
+        );
+      } finally {
+        context.newCDPSession = original;
+      }
+    } finally {
+      await page.close();
+    }
+  }, 10_000);
+
   test("throws instead of silently falling back when the marker is visible but its content has no measurable box", async () => {
     // The marker itself has an explicit box (so it passes the `visible`
     // wait), but its only child collapses to zero size -- e.g. a story
@@ -303,7 +376,7 @@ describe("captureAll (real call site)", () => {
 
   beforeAll(async () => {
     const build = await buildSnapshotEntry(
-      [...stories, schemeStory, emptyStory, portalStory],
+      [...stories, schemeStory, emptyStory, portalStory, overhangStory],
       testPackages(),
       testConfig(),
       cwd,
@@ -484,6 +557,48 @@ describe("captureAll (real call site)", () => {
     const { width, height } = pngDimensions(results[0]!.buffer);
     expect(width).toBe(60);
     expect(height).toBe(30);
+  }, 20_000);
+
+  test("captures a position: fixed root pinned past the document's bottom raster edge at its full requested size", async () => {
+    const config = snapshotConfig({ viewports: [{ width: 100, height: 200 }], concurrency: 1 });
+
+    const { captures: results } = await captureAllWithBuffers(
+      browser,
+      [overhangStory],
+      config,
+      serverUrl,
+      "BottomOverhang",
+    );
+
+    expect(results).toHaveLength(1);
+    const { width, height } = pngDimensions(results[0]!.buffer);
+    // The fixed box sits at (0,150) and is 100x100 (bottom edge at 250), but
+    // the document stays 100x200 tall because nothing else forces it to
+    // grow -- it overhangs the raster by 50px. A plain
+    // `page.screenshot({ clip })` silently returns only the top 50px; this
+    // must return the full requested box.
+    expect(width).toBe(100);
+    expect(height).toBe(100);
+  }, 20_000);
+
+  test("captures a position: fixed root pinned past the document's right raster edge at its full requested size", async () => {
+    const config = snapshotConfig({ viewports: [{ width: 100, height: 200 }], concurrency: 1 });
+
+    const { captures: results } = await captureAllWithBuffers(
+      browser,
+      [overhangStory],
+      config,
+      serverUrl,
+      "RightOverhang",
+    );
+
+    expect(results).toHaveLength(1);
+    const { width, height } = pngDimensions(results[0]!.buffer);
+    // The fixed box sits at (50,0) and is 100x80 (right edge at 150), but the
+    // document stays 100px wide -- the same truncation as the bottom-edge
+    // case, on the other axis.
+    expect(width).toBe(100);
+    expect(height).toBe(80);
   }, 20_000);
 
   test("without modes, a story is captured once under the unsuffixed filename in the light scheme", async () => {

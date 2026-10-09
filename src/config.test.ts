@@ -18,11 +18,23 @@ afterEach(async () => {
 });
 
 describe("loadConfig snapshot options", () => {
-  test("defaults settleTimeout to ten seconds and carries no waitTimeout", async () => {
+  test("defaults settleTimeout and reducedMotion while carrying no waitTimeout", async () => {
     const config = await loadConfig(cwd);
     expect(config.snapshot.settleTimeout).toBe(10_000);
+    expect(config.snapshot.reducedMotion).toBe("no-preference");
     expect("waitTimeout" in config.snapshot).toBe(false);
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("preserves an explicit reduced-motion preference", async () => {
+    await Bun.write(
+      join(cwd, "storybun.config.ts"),
+      `export default { snapshot: { reducedMotion: "reduce" } };`,
+    );
+
+    const config = await loadConfig(cwd);
+
+    expect(config.snapshot.reducedMotion).toBe("reduce");
   });
 
   test("warns once about a deprecated waitTimeout and drops it from the resolved config", async () => {

@@ -20,6 +20,7 @@ function testConfig(): ResolvedConfig {
       clock: null,
       timezoneId: "UTC",
       locale: "en-US",
+      reducedMotion: "no-preference",
       modes: {},
       report: { component: null },
     },
@@ -69,7 +70,7 @@ describe("generateSnapshotEntry readiness hooks", () => {
     { path: "a/b", filePath: "/tmp/a.stories.tsx", exports: ["Foo"], packageName: "test-pkg" },
   ];
 
-  test("keeps the CSS animation kill switch as the backstop for reduced-motion emulation", () => {
+  test("keeps the CSS animation kill switch as a backstop for animations", () => {
     const code = generateSnapshotEntry(stories, testPackages(), testConfig(), "/tmp");
     expect(code).toContain("animation-duration: 0s !important");
     expect(code).toContain("transition-duration: 0s !important");

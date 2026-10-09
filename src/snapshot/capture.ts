@@ -225,9 +225,13 @@ interface SettleVerdict {
 // - fonts loaded and every image complete, in the page and in every
 //   same-origin framed document (an iframe's `load` does not wait for the
 //   fonts its document uses);
-// - no animation running: with reduced motion emulated and CSS durations
-//   zeroed that is almost always true at once; a finite animation that is
-//   not is simply waited for, and one that would never end (infinite
+// - no animation running: the generated entry zeroes CSS durations, while
+//   finite JavaScript animations are waited out under the default
+//   `no-preference` environment. Consumers may opt into reduced motion to
+//   make components skip those animations. On an animation-heavy 16-capture
+//   fixture at concurrency 4, that opt-in measured 1.707s median wall time
+//   versus 3.791s for the default (about 130ms per capture); the compatibility
+//   trade is deliberate. An animation that would never end (infinite
 //   iterations, a spinner) is paused at its first frame so the story can
 //   settle at all, and settle on the same frame every run;
 // - the DOM did not mutate and the measured box did not move across two
@@ -529,11 +533,10 @@ export async function captureStoryOrPage(
  * page: calling `setFixedTime` for every page while sibling pages in the same
  * context close raced with "Target page, context or browser has been closed".
  *
- * Reduced motion is emulated for every capture. Motion libraries and consumer
- * stylesheets with a `prefers-reduced-motion` branch then switch their own
- * animation off, which is both faster and more faithful than a CSS override
- * could be. Turning this on is a one-time re-baseline for a project whose
- * components honour the preference.
+ * The configured motion preference is emulated for every capture. The default
+ * preserves the browser's `no-preference` behaviour; opting into `reduce`
+ * lets motion libraries and stylesheets switch off or simplify their motion
+ * and requires a one-time re-baseline wherever components honour it.
  */
 async function createContext(
   browser: Browser,
@@ -548,7 +551,7 @@ async function createContext(
     timezoneId: mode?.timezoneId ?? config.timezoneId,
     locale: mode?.locale ?? config.locale,
     colorScheme: mode?.colorScheme,
-    reducedMotion: "reduce",
+    reducedMotion: config.reducedMotion,
   });
   if (fixedTime) {
     await context.clock.setFixedTime(fixedTime);

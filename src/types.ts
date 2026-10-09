@@ -68,6 +68,13 @@ export interface SnapshotConfig {
   /** Locale for the page, driving `Intl` output (default: "en-US"). */
   locale?: string;
   /**
+   * Emulated `prefers-reduced-motion` preference for every capture (default:
+   * `"no-preference"`, matching storybun before reduced motion was introduced).
+   * Set to `"reduce"` to let components skip or simplify motion; changing it
+   * re-baselines every story whose component branches on the preference.
+   */
+  reducedMotion?: "reduce" | "no-preference";
+  /**
    * Named environments every story is captured in, e.g.
    * `{ light: { colorScheme: "light" }, dark: { colorScheme: "dark" } }`.
    * Each story x viewport is captured once per mode, and the mode name is
@@ -111,6 +118,7 @@ export interface ResolvedSnapshotConfig {
   clock: string | null;
   timezoneId: string;
   locale: string;
+  reducedMotion: "reduce" | "no-preference";
   modes: Record<string, SnapshotMode>;
   report: {
     component: string | null;

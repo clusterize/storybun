@@ -12,6 +12,10 @@ const snapshotDefaults: ResolvedSnapshotConfig = {
   clock: null,
   timezoneId: "UTC",
   locale: "en-US",
+  // 5fe223f forced `"reduce"` unconditionally, which silently re-baselined
+  // consumers whose components honour the preference. Restore the older
+  // behaviour by default; the stricter reduced-motion environment is opt-in.
+  reducedMotion: "no-preference",
   modes: {},
   report: { component: null },
 };

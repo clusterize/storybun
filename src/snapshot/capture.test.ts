@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll, spyOn } from "bun:test";
 import { join } from "path";
 import { chromium, type Browser, type Page } from "playwright";
 
@@ -49,6 +49,7 @@ function testConfig(): ResolvedConfig {
       clock: null,
       timezoneId: "UTC",
       locale: "en-US",
+      reducedMotion: "no-preference",
       modes: {},
       report: { component: null },
     },
@@ -797,9 +798,40 @@ describe("readiness contract (real chromium)", () => {
     expect(pixelAt(buffer, 75, 50)).toEqual([0, 0, 255, 255]);
   }, 20_000);
 
-  test("emulates prefers-reduced-motion: reduce", async () => {
-    const buffer = await captureSingle(motionStory, "ReducedMotion");
-    expect(pixelAt(buffer, 50, 30)).toEqual([0, 255, 0, 255]);
+  test("applies the configured reduced-motion preference to capture pages", async () => {
+    async function observe(reducedMotion: "reduce" | "no-preference") {
+      const contextOptions: unknown[] = [];
+      const mediaMatches: boolean[] = [];
+      const newContext = browser.newContext.bind(browser);
+      const contextSpy = spyOn(browser, "newContext").mockImplementation(async (options) => {
+        contextOptions.push(options?.reducedMotion);
+        const context = await newContext(options);
+        const newPage = context.newPage.bind(context);
+        spyOn(context, "newPage").mockImplementation(async () => {
+          const page = await newPage();
+          mediaMatches.push(
+            await page.evaluate(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches),
+          );
+          return page;
+        });
+        return context;
+      });
+      try {
+        await captureSingle(motionStory, "SnapshotFlag", { reducedMotion });
+      } finally {
+        contextSpy.mockRestore();
+      }
+      return { contextOptions, mediaMatches };
+    }
+
+    expect(await observe("no-preference")).toEqual({
+      contextOptions: ["no-preference"],
+      mediaMatches: [false],
+    });
+    expect(await observe("reduce")).toEqual({
+      contextOptions: ["reduce"],
+      mediaMatches: [true],
+    });
   }, 20_000);
 
   test("flags the document with data-storybun-snapshot", async () => {

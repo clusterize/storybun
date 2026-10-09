@@ -46,6 +46,7 @@ function config(): ResolvedSnapshotConfig {
     clock: "2026-07-30T12:00:00.000Z",
     timezoneId: "UTC",
     locale: "en-US",
+    reducedMotion: "no-preference",
     modes: { light: { colorScheme: "light" }, dark: { colorScheme: "dark" } },
     report: { component: null },
   };

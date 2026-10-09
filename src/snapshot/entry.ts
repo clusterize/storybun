@@ -75,11 +75,11 @@ const storyPackages: Record<string, string> = {
 ${storyPkgMap}
 };
 ${wrappersDecl}
-// Zero out CSS animations and transitions. The browser context also emulates
-// \`prefers-reduced-motion: reduce\`, which is what JavaScript-driven motion
-// libraries and consumer stylesheets honour; this rule is the backstop for a
-// CSS animation that has no reduced-motion branch of its own, so that it
-// finishes instantly instead of keeping the story from ever settling.
+// Zero out CSS animations and transitions unconditionally so they cannot keep
+// a story from settling. This does not affect Web Animations API motion, which
+// the settle contract waits out or pauses. When snapshot.reducedMotion: "reduce"
+// is set, motion libraries and reduced-motion stylesheet branches additionally
+// switch their own motion off via the emulated prefers-reduced-motion preference.
 const style = document.createElement("style");
 style.textContent = "* { animation-duration: 0s !important; transition-duration: 0s !important; }";
 document.head.appendChild(style);

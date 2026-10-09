@@ -144,6 +144,10 @@ export default {
     timezoneId: "UTC",
     locale: "en-US",
 
+    // Motion emulation for prefers-reduced-motion (default: "no-preference").
+    // Set to "reduce" to opt into emulating the preference, which is a one-time re-baseline.
+    reducedMotion: "no-preference",
+
     // Environments every story is captured in, on top of `viewports`. Each
     // story is captured once per mode and the mode name is appended to the
     // baseline filename (`Button--Primary-dark.png`). Unset captures each
@@ -202,14 +206,16 @@ waits while it is above zero. With TanStack Query, for example:
 window.__storybunPending = () => queryClient.isFetching() + queryClient.isMutating();
 ```
 
-**Motion.** Every capture runs with `prefers-reduced-motion: reduce` emulated,
-so motion libraries and stylesheets that honour the preference switch their
-animation off on their own; CSS animations and transitions are additionally
-forced to zero duration as a backstop. A finite animation that still runs (a
-Web Animations API fade, say) is waited for. One that would never end -- a
-spinner with infinite iterations -- is paused at its first frame so the story
-can settle, and settles on the same frame every run. Enabling reduced motion
-is a one-time re-baseline for components that render differently under it.
+**Motion.** By default, captures emulate `no-preference`, so a component that
+branches on `prefers-reduced-motion` renders its normal, animated form. CSS
+animations and transitions are forced to zero duration unconditionally, so a
+CSS animation cannot keep a story from settling. A finite Web Animations API
+animation is waited for. An infinite one (like a spinner) is paused at its
+first frame so the story settles at all, and settles on the same frame every
+run. Setting `snapshot.reducedMotion: "reduce"` opts into emulating the
+preference instead, which lets motion libraries and reduced-motion stylesheet
+branches switch motion off themselves; this re-baselines affected components
+and is usually faster, at the cost of viewing them in a reduced-motion state.
 
 **Knowing you are under capture.** The snapshot document carries
 `data-storybun-snapshot` on `<html>` from before any script runs, so a Wrapper

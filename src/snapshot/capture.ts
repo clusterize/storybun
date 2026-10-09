@@ -230,8 +230,8 @@ interface SettleVerdict {
 //   `no-preference` environment. Consumers may opt into reduced motion to
 //   make components skip those animations. On an animation-heavy 16-capture
 //   fixture at concurrency 4, that opt-in measured 1.707s median wall time
-//   versus 3.791s for the default (about 130ms per capture); the compatibility
-//   trade is deliberate. An animation that would never end (infinite
+//   versus 3.791s for the default (amortised to about 130ms wall time per
+//   capture at concurrency 4); the compatibility trade is deliberate. An animation that would never end (infinite
 //   iterations, a spinner) is paused at its first frame so the story can
 //   settle at all, and settle on the same frame every run;
 // - the DOM did not mutate and the measured box did not move across two

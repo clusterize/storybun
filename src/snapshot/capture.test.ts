@@ -44,6 +44,7 @@ function testConfig(): ResolvedConfig {
       maxDiffPixels: 0,
       viewports: [{ width: 800, height: 600 }],
       settleTimeout: 2_000,
+      markerTimeout: 500,
       concurrency: 1,
       codeowners: [],
       clock: null,
@@ -935,6 +936,37 @@ describe("readiness contract (real chromium)", () => {
       /^fixtures\/async--NeverSettles: story did not settle within 1000ms: the DOM changed between two frames/,
     );
   }, 20_000);
+
+  test("honors a configured markerTimeout at the capture call site, not the hardcoded 500ms default", async () => {
+    // A story key absent from the bundle hits entry.ts's "Story not found"
+    // branch: no marker is ever committed, so `captureStoryOrPage`'s
+    // `marker.waitFor` always runs out its full timeout before falling back
+    // to a full-page screenshot. That wait is the one driven by
+    // `config.markerTimeout`, so how long it takes proves whether the
+    // configured value actually reached it rather than being ignored.
+    const missingStory = {
+      path: "fixtures/does-not-exist",
+      filePath: join(fixturesDir, "does-not-exist.stories.tsx"),
+      exports: ["Nope"],
+      packageName: "test-pkg",
+    };
+    const startedAt = performance.now();
+    const { captures, failures } = await captureAllWithBuffers(
+      browser,
+      [missingStory],
+      snapshotConfig({ markerTimeout: 100 }),
+      serverUrl,
+    );
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(failures).toEqual([]);
+    expect(captures).toHaveLength(1);
+    // With the 500ms hardcoded default this same scenario takes ~900ms
+    // (setup overhead plus the full marker wait); comfortably under that is
+    // only possible if the configured 100ms actually reached the marker
+    // wait instead of being ignored.
+    expect(elapsedMs).toBeLessThan(700);
+  }, 10_000);
 
   test("keeps the clock frozen for every page of a context, not only the first", async () => {
     const { captures, failures } = await captureAllWithBuffers(

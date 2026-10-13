@@ -7,6 +7,7 @@ const snapshotDefaults: ResolvedSnapshotConfig = {
   maxDiffPixels: 0,
   viewports: [{ width: 1280, height: 720 }],
   settleTimeout: 10_000,
+  markerTimeout: 500,
   concurrency: 4,
   codeowners: [],
   clock: null,

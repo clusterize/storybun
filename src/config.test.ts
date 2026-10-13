@@ -25,6 +25,11 @@ describe("loadConfig snapshot options", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  test("defaults markerTimeout to 500ms when unset", async () => {
+    const config = await loadConfig(cwd);
+    expect(config.snapshot.markerTimeout).toBe(500);
+  });
+
   test("warns once about a deprecated waitTimeout and drops it from the resolved config", async () => {
     await Bun.write(
       join(cwd, "storybun.config.ts"),

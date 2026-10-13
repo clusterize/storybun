@@ -15,6 +15,7 @@ function testConfig(): ResolvedConfig {
       maxDiffPixels: 0,
       viewports: [{ width: 800, height: 600 }],
       settleTimeout: 2_000,
+      markerTimeout: 500,
       concurrency: 1,
       codeowners: [],
       clock: null,

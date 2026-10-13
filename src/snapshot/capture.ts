@@ -674,6 +674,7 @@ export async function captureOne(
     await page.setViewportSize(options.viewport);
     await renderStory(page, serverUrl, options.storyKey, config);
     return await captureStoryOrPage(page, options.storyKey, {
+      markerTimeoutMs: config.markerTimeout,
       settleTimeoutMs: config.settleTimeout,
     });
   } finally {
@@ -787,6 +788,7 @@ export async function captureAll(
       await renderStory(page, serverUrl, storyKey, config);
 
       const buffer = await captureStoryOrPage(page, storyKey, {
+        markerTimeoutMs: config.markerTimeout,
         settleTimeoutMs: config.settleTimeout,
       });
       const dimensions = pngDimensions(buffer);

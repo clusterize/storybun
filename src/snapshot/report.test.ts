@@ -41,6 +41,7 @@ function config(): ResolvedSnapshotConfig {
     maxDiffPixels: 0,
     viewports: [viewport],
     settleTimeout: 2_000,
+    markerTimeout: 500,
     concurrency: 1,
     codeowners: [],
     clock: "2026-07-30T12:00:00.000Z",

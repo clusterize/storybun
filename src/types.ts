@@ -54,6 +54,14 @@ export interface SnapshotConfig {
    * naming it; nothing falls back to a blank or partial image.
    */
   settleTimeout?: number;
+  /**
+   * How long, in ms, a capture waits for the story marker to attach before
+   * giving up (default: 500). By the time this runs, the settle wait above
+   * has already required the marker to be attached with a measurable box,
+   * so this is a safety margin, not the real render wait -- raise it if a
+   * contended runner's CPU scheduling delays that attachment past 500ms.
+   */
+  markerTimeout?: number;
   concurrency?: number;
   codeowners?: string[];
   /**
@@ -106,6 +114,7 @@ export interface ResolvedSnapshotConfig {
   maxDiffPixels: number;
   viewports: { width: number; height: number; name?: string }[];
   settleTimeout: number;
+  markerTimeout: number;
   concurrency: number;
   codeowners: string[];
   clock: string | null;

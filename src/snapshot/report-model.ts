@@ -85,6 +85,13 @@ export interface ReportConfig {
   timezoneId: string;
 }
 
+/**
+ * Which entries' images the HTML report shows. `review` leaves out passed and
+ * updated captures, whose images a reviewer does not need, so a publisher can
+ * upload only `filesToPublish(report)` without the page showing broken images.
+ */
+export type ReportImages = "all" | "review";
+
 export interface SnapshotReport {
   version: typeof REPORT_VERSION;
   generatedAt: string;
@@ -92,6 +99,8 @@ export interface SnapshotReport {
   outDir: string;
   /** Short or full commit SHA when known (`GITHUB_SHA`), else null. */
   commit: string | null;
+  /** Absent in reports written before the field existed; read that as `all`. */
+  images?: ReportImages;
   summary: ReportSummary;
   config: ReportConfig;
   results: ReportEntry[];
@@ -116,6 +125,8 @@ export interface BuildReportInput {
   outDirName: string;
   exitCode: number;
   commit?: string | null;
+  /** `--report-images`; default `all`. */
+  images?: ReportImages;
   now?: Date;
 }
 
@@ -312,6 +323,7 @@ export async function buildReport(input: BuildReportInput): Promise<SnapshotRepo
     generatedAt: (input.now ?? new Date()).toISOString(),
     outDir: input.outDirName,
     commit: input.commit ?? null,
+    images: input.images ?? "all",
     summary,
     config: {
       threshold: config.threshold,

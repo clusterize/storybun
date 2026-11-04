@@ -1,7 +1,8 @@
 import { isAbsolute, join } from "path";
 import type { ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { ReportDimensions, ReportEntry, ReportStatus, SnapshotReport } from "./report-model.ts";
+import type { ReportDimensions, ReportEntry, ReportImages, ReportStatus, SnapshotReport } from "./report-model.ts";
+import { imagesPublished } from "./publish.ts";
 
 /**
  * What a report template receives. The default template below and any custom
@@ -206,12 +207,26 @@ const EXPAND_ICON = (
   </svg>
 );
 
-function Entry({ uid, entry, prefix }: { uid: string; entry: ReportEntry; prefix: string }) {
+function Entry({
+  uid,
+  entry,
+  prefix,
+  images,
+}: {
+  uid: string;
+  entry: ReportEntry;
+  prefix: string;
+  images?: ReportImages;
+}) {
   const { files, dimensions } = entry;
   const label = entryLabel(entry);
   const dimensionChange =
     entry.status === "changed" && files.diff === null && dimensions.baseline && dimensions.actual;
-  const hasImage = entry.status === "changed" || (entry.status !== "capture-failed" && files.baseline !== null);
+  // With `--report-images review`, passed and updated captures are listed
+  // without their images, which were not uploaded with the page.
+  const published = imagesPublished({ images }, entry);
+  const hasImage =
+    entry.status === "changed" || (entry.status !== "capture-failed" && files.baseline !== null && published);
 
   return (
     <section className={`entry status-${entry.status}`} data-status={entry.status} data-mode={entry.mode ?? ""}>
@@ -236,7 +251,8 @@ function Entry({ uid, entry, prefix }: { uid: string; entry: ReportEntry; prefix
         )}
       </div>
       {entry.status === "changed" && <Comparison uid={uid} entry={entry} prefix={prefix} />}
-      {entry.status !== "changed" && entry.status !== "capture-failed" && files.baseline && (
+      {files.baseline && !published && <div className="detail">image not published with this report</div>}
+      {entry.status !== "changed" && entry.status !== "capture-failed" && files.baseline && published && (
         <div className="images cols-1">
           <Image
             prefix={prefix}
@@ -252,7 +268,17 @@ function Entry({ uid, entry, prefix }: { uid: string; entry: ReportEntry; prefix
   );
 }
 
-function Story({ group, prefix, id }: { group: StoryGroup; prefix: string; id: string }) {
+function Story({
+  group,
+  prefix,
+  id,
+  images,
+}: {
+  group: StoryGroup;
+  prefix: string;
+  id: string;
+  images?: ReportImages;
+}) {
   const [path, name] = splitStoryKey(group.storyKey);
   return (
     <article className="story" id={id} data-key={group.storyKey.toLowerCase()}>
@@ -266,7 +292,7 @@ function Story({ group, prefix, id }: { group: StoryGroup; prefix: string; id: s
       </h3>
       <div className="entries">
         {group.entries.map((entry, i) => (
-          <Entry key={i} uid={`${id}-e${i}`} entry={entry} prefix={prefix} />
+          <Entry key={i} uid={`${id}-e${i}`} entry={entry} prefix={prefix} images={images} />
         ))}
       </div>
     </article>
@@ -651,6 +677,7 @@ export function DefaultReport({ report, imagePrefix }: ReportTemplateProps) {
   meta.push(`threshold ${config.threshold}`);
   if (config.maxDiffPixels > 0) meta.push(`up to ${config.maxDiffPixels} differing pixels tolerated`);
   if (config.clock) meta.push(`clock frozen at ${config.clock}`);
+  if (report.images === "review") meta.push("only images that need a look are published");
   meta.push(`generated ${report.generatedAt}`);
 
   return (
@@ -710,7 +737,7 @@ export function DefaultReport({ report, imagePrefix }: ReportTemplateProps) {
             const body =
               s.groups.length > 0 ? (
                 s.groups.map((group, i) => (
-                  <Story key={group.storyKey} group={group} prefix={imagePrefix} id={`${s.id}-${i}`} />
+                  <Story key={group.storyKey} group={group} prefix={imagePrefix} id={`${s.id}-${i}`} images={report.images} />
                 ))
               ) : (
                 <p className="meta">Nothing {STATUS_LABEL[s.status]}.</p>

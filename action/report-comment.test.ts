@@ -65,7 +65,7 @@ describe("buildComment", () => {
     expect(body).toContain("**New** (1)\n- `Components/Badge--Small` [light]");
     expect(body).toContain("**Removed** (1)\n- `Old--Gone`\n");
     expect(body).toContain("**Could not be captured** (1)\n- `Timeline--Empty` [light]: rendered nothing");
-    expect(body).toContain("[Open the report](https://assets.example/pr-1/abc/report.html) for before / after / diff of every story at `0123456`.");
+    expect(body).toContain("[Open the report](https://assets.example/pr-1/abc/report.html) for before / after / diff of every change at `0123456`.");
     expect(body).not.toContain("Fine--One");
   });
 

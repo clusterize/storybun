@@ -67,6 +67,12 @@ function parseViewport(
   return { width: Number(match[1]), height: Number(match[2]) };
 }
 
+function parseReportImages(value: string | undefined): "all" | "review" | undefined {
+  if (value === undefined || value === "all" || value === "review") return value;
+  console.error(`Invalid --report-images ${JSON.stringify(value)}. Expected "all" or "review".`);
+  process.exit(1);
+}
+
 async function snapshot(args: string[]) {
   const { runSnapshots } = await import("./snapshot/index.ts");
 
@@ -77,8 +83,12 @@ async function snapshot(args: string[]) {
   const json = parseOptionalPathFlag(args, "--json");
   const html = parseOptionalPathFlag(args, "--html");
   const quiet = args.includes("--quiet") || args.includes("-q");
+  // A bare flag (no value) is a typo for one of the two values, not a default.
+  const reportImages = parseReportImages(
+    args.includes("--report-images") ? (flagValue(args, "--report-images") ?? "") : undefined,
+  );
 
-  const exitCode = await runSnapshots(cwd, { update, filter, codeowners, json, html, quiet });
+  const exitCode = await runSnapshots(cwd, { update, filter, codeowners, json, html, quiet, reportImages });
   process.exit(exitCode);
 }
 
@@ -145,6 +155,9 @@ snapshot options:
       --codeowners   Rewrite the CODEOWNERS entry for the snapshot directory
       --json [path]  Write a machine-readable report (default: <outDir>/report.json)
       --html [path]  Write a browsable HTML report (default: <outDir>/report.html)
+      --report-images <all|review>
+                     review: the reports expect only the images of changed, new
+                     and removed captures to be published (default: all)
   -q, --quiet        No per-capture progress lines; phases, failures and the summary only
 
 list options:

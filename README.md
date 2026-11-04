@@ -303,6 +303,7 @@ in `outDir` that no story of this run produced:
   "generatedAt": "2026-09-29T10:58:04.312Z",
   "outDir": "__snapshots__",
   "commit": "abcdef1...",           // GITHUB_SHA when set, else null
+  "images": "all",                  // --report-images: all | review
   "summary": { "total": 6, "passed": 0, "changed": 4, "new": 0, "removed": 2, "captureFailed": 0, "updated": 0, "exitCode": 1 },
   "config": { "threshold": 0.1, "viewports": [{ "width": 1280, "height": 720 }], "modes": ["light", "dark"],
               "clock": "2026-07-30T12:00:00.000Z", "locale": "en-US", "timezoneId": "UTC" },
@@ -376,6 +377,23 @@ Without JavaScript the page still shows every image, every mode and the
 comparison tabs; only the mode switch, the filter, the slider's divider and
 the full-screen view need it.
 
+#### Publishing only the images that need a look
+
+Most captures of a typical run pass, and a passed capture's image is just its
+baseline. `--report-images review` tells the reports that only the images of
+changed, new and removed captures will be published next to them:
+
+```bash
+storybun snapshot --json --html --report-images review
+```
+
+`report.json` still lists every entry and every file, and records
+`"images": "review"`. `report.html` shows a passed (or updated) capture as its
+badge and a "not published" note instead of an image, so the page has no broken
+images when served from a bucket that holds only the rest. `filesToPublish(report)`,
+exported from `storybun`, returns exactly the files the page shows, relative to
+`outDir`; upload those. The default, `all`, shows every image as before.
+
 #### Custom HTML template
 
 The page is rendered from a React component that receives the report. Point
@@ -402,7 +420,8 @@ export default function Report({ report, imagePrefix }: ReportTemplateProps) {
 ```
 
 `imagePrefix` turns a `files.*` path into an `img src` relative to the HTML
-file. The component is rendered once, in Bun, with `renderToStaticMarkup`:
+file; a template that shows images should skip the entries for which
+`imagesPublished(report, entry)` (exported from `storybun`) is false. The component is rendered once, in Bun, with `renderToStaticMarkup`:
 there is no browser, so no state, effects or event handlers. Interactivity has
 to come from static HTML (`<details>`, anchors) or an inline `<script>` string
 the template emits itself. The default export or a named `Report` export is used.
@@ -448,7 +467,11 @@ up under `pr-<number>/<sha>/` (`<ref>/<sha>/` outside pull requests) with the
 two report files next to them, so the relative image paths in `report.html`
 resolve unchanged; the comment links to `<public-base-url>/<prefix>/report.html`.
 By default that happens only when something needs a look (`publish: always`
-changes it). The step fails when the run exits non-zero, i.e. on changed stories
+changes it), and only the images of changed, new and removed captures are
+uploaded: the action runs with `--report-images review`, so the published page
+shows passed captures without an image. On a large suite that skips thousands
+of unchanged baselines per run; `publish-images: all` uploads every image the
+report shows instead. The step fails when the run exits non-zero, i.e. on changed stories
 or capture failures; `fail-on-changes: false` turns that into an output only.
 
 On the main branch, `update: true` runs `--update` so a following

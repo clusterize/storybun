@@ -527,6 +527,39 @@ describe("HTML report", () => {
     expect(html).toContain('href="#updated"');
   });
 
+  test("with review images, a passed capture shows no image, only a note; the ones needing a look keep theirs", async () => {
+    const report = await buildReport({
+      captures,
+      compared: results,
+      failures,
+      removed: [],
+      config: config(),
+      outDirName: "__snapshots__",
+      exitCode: 1,
+      images: "review",
+      now,
+    });
+    expect(report.images).toBe("review");
+    const html = renderReportHtml(report, "");
+    expect(html).toContain("only images that need a look are published");
+    // Button--Primary light passed: badge and note, no image.
+    expect(html).not.toContain('src="Components--Button--Primary-light.png"');
+    expect(html.match(/image not published with this report/g)).toHaveLength(1);
+    // Changed and new keep every image.
+    expect(html).toContain('src="Components--Button--Primary-dark.png"');
+    expect(html).toContain('src="Components--Button--Primary-dark.actual.png"');
+    expect(html).toContain('src="Components--Button--Primary-dark.diff.png"');
+    expect(html).toContain('src="Components--Card--Wide-dark.png"');
+  });
+
+  test("by default every image is shown and the report says so", async () => {
+    const report = await mixedReport();
+    expect(report.images).toBe("all");
+    const html = renderReportHtml(report, "");
+    expect(html).toContain('src="Components--Button--Primary-light.png"');
+    expect(html).not.toContain("not published");
+  });
+
   test("a custom template replaces the default page and receives the same props", async () => {
     const Template = await loadReportTemplate(cwd, join(fixturesDir, "custom-report.tsx"));
     const html = renderReportHtml(await mixedReport(), "img/", Template);

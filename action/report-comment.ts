@@ -82,7 +82,7 @@ export function buildComment(report: SnapshotReport, options: CommentOptions = {
     ...section("Could not be captured", by("capture-failed")),
   );
   if (options.reportUrl) {
-    lines.push(`[Open the report](${options.reportUrl}) for before / after / diff of every story${at}.`);
+    lines.push(`[Open the report](${options.reportUrl}) for before / after / diff of every change${at}.`);
   } else {
     lines.push(`Run \`storybun snapshot --html\` locally for before / after / diff of every story${at}.`);
   }

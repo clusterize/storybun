@@ -9,7 +9,7 @@ import { compareCapture, describeCompareOutcome, pruneBaselines, updateBaseline,
 import { printReport, printUpdateReport, printFailures, printPruned, getExitCode } from "./report.ts";
 import { updateCodeowners } from "./codeowners.ts";
 import { loadPlaywright } from "./playwright.ts";
-import { buildReport, findRemovedBaselines } from "./report-model.ts";
+import { buildReport, findRemovedBaselines, type ReportImages } from "./report-model.ts";
 import { loadReportTemplate } from "./report-html.tsx";
 import { resolveReportPath, writeHtmlReport, writeJsonReport } from "./report-files.ts";
 import { formatDuration, formatPlan, formatProgress } from "./progress.ts";
@@ -24,6 +24,8 @@ interface SnapshotOptions {
   html?: string | true;
   /** `--quiet`: no per-capture progress lines, only phases and the summary. */
   quiet?: boolean;
+  /** `--report-images`: which entries' images the reports expect to be published. */
+  reportImages?: ReportImages;
 }
 
 /** Logs `<label> in <duration>` once the awaited work is done. */
@@ -164,6 +166,7 @@ export async function runSnapshots(
           outDirName: snapshotConfig.outDir,
           exitCode,
           commit: process.env.GITHUB_SHA ?? null,
+          images: options.reportImages,
         });
 
         if (options.json !== undefined) {

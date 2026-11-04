@@ -56,6 +56,9 @@ inputs:
   publish:
     description: "`review` publishes only when something needs a look (changed, new, removed, capture failed); `always` publishes every run."
     default: review
+  publish-images:
+    description: "`review` uploads only the images of changed, new and removed captures and the report shows the rest without images; `all` uploads every image the report shows."
+    default: review
 
   # Pull request comment
   comment:
@@ -121,9 +124,12 @@ runs:
         STORYBUN_ARGS: ${{ inputs.args }}
         STORYBUN_UPDATE: ${{ inputs.update }}
         STORYBUN_QUIET: ${{ inputs.quiet }}
+        STORYBUN_REPORT_IMAGES: ${{ inputs.publish-images }}
         SNAPSHOT_DIR: ${{ inputs.snapshot-dir }}
       run: |
-        flags=(--json --html)
+        # The report records which images it expects published; the publish
+        # step reads that back from report.json, so the two cannot disagree.
+        flags=(--json --html --report-images "$STORYBUN_REPORT_IMAGES")
         [ "$STORYBUN_UPDATE" = "true" ] && flags+=(--update)
         [ "$STORYBUN_QUIET" = "true" ] && flags+=(--quiet)
         # shellcheck disable=SC2086
@@ -154,6 +160,7 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         SNAPSHOT_DIR: ${{ inputs.snapshot-dir }}
+        REPORT_PATH: ${{ steps.snapshot.outputs.json-path }}
         S3_BUCKET: ${{ inputs.s3-bucket }}
         S3_ENDPOINT: ${{ inputs.s3-endpoint }}
         S3_PREFIX: ${{ inputs.s3-prefix }}
@@ -176,9 +183,15 @@ runs:
         endpoint=()
         [ -n "$S3_ENDPOINT" ] && endpoint=(--endpoint-url "$S3_ENDPOINT")
 
+        # Only the images report.html shows go up: with `publish-images: review`
+        # that leaves out every passed capture, by far most of the directory.
+        # They are linked into a staging directory so one sync uploads them
+        # with the CLI's own parallelism instead of one process per file.
+        stage="$(mktemp -d "${RUNNER_TEMP:-/tmp}/storybun-images.XXXXXX")"
+        STAGE_DIR="$stage" bun "$GITHUB_ACTION_PATH/action/stage-images.ts"
+
         # Images are immutable per commit; the two report files must never be served stale.
-        aws s3 sync "$SNAPSHOT_DIR/" "s3://$S3_BUCKET/$prefix/" \
-          --exclude "*" --include "*.png" \
+        aws s3 sync "$stage/" "s3://$S3_BUCKET/$prefix/" \
           --content-type "image/png" --cache-control "public, max-age=31536000, immutable" \
           --no-progress --only-show-errors "${endpoint[@]}"
         aws s3 cp "$SNAPSHOT_DIR/report.html" "s3://$S3_BUCKET/$prefix/report.html" \
@@ -187,6 +200,7 @@ runs:
         aws s3 cp "$SNAPSHOT_DIR/report.json" "s3://$S3_BUCKET/$prefix/report.json" \
           --content-type "application/json" --cache-control "no-cache" \
           --only-show-errors "${endpoint[@]}"
+        rm -rf "$stage"
 
         echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
         if [ -n "$PUBLIC_BASE_URL" ]; then

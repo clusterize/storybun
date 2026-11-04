@@ -3,16 +3,19 @@ import type { BuildResult } from "./builder.ts";
 
 interface ServerState {
   html: string;
+  frameHtml: string;
   assets: Map<string, string>;
 }
 
 const state: ServerState = {
   html: "",
+  frameHtml: "",
   assets: new Map(),
 };
 
 export function startServer(buildResult: BuildResult, port: number): Server {
   state.html = buildResult.html;
+  state.frameHtml = buildResult.frameHtml;
   state.assets = buildResult.assets;
 
   const server = Bun.serve({
@@ -29,6 +32,13 @@ export function startServer(buildResult: BuildResult, port: number): Server {
       // Serve index
       if (url.pathname === "/") {
         return new Response(state.html, {
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
+      }
+
+      // The page inside the story iframe
+      if (url.pathname === "/frame.html") {
+        return new Response(state.frameHtml, {
           headers: { "Content-Type": "text/html; charset=utf-8" },
         });
       }
@@ -61,6 +71,7 @@ export function updateServer(
   buildResult: BuildResult,
 ) {
   state.html = buildResult.html;
+  state.frameHtml = buildResult.frameHtml;
   state.assets = buildResult.assets;
   server.publish("reload", "reload");
 }

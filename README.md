@@ -9,8 +9,9 @@ A fast, zero-config component explorer built on [Bun](https://bun.sh). Think Sto
 - **Hot reload** — WebSocket-based live reload on file changes
 - **Monorepo support** — Discovers packages automatically, per-package config and wrappers
 - **Customizable UI** — Replace Layout, Sidebar, or Wrapper components
-- **Style isolation** — Storybun's styles never leak into your components
-- **Dark/light theme** — Follows system preference
+- **Style isolation** — Each story renders in its own iframe: its global CSS, portals and overlays stay out of the UI around it
+- **Modes and viewports** — Switch the story between your snapshot `modes` (light/dark), or show them side by side, at any viewport
+- **Dark/light theme** — The UI itself follows system preference
 
 ## Quick Start
 
@@ -59,6 +60,41 @@ export const WithImage = () => <Card image="/hero.png">Hello</Card>;
 
 The sidebar tree is derived from file paths — `src/components/Card.stories.tsx` becomes `Components/Card`.
 
+## The dev UI
+
+Groups start collapsed, except the way to the open story; a run of folders
+with nothing else in them is shown as one row (`src/components/forms`), and
+each group shows how many stories it holds. Typing in the search box (`⌘K`)
+lists matching stories directly, best match first: every word you type has to
+appear in the story key, and a match in the story's name ranks above one in
+its path. `↑`/`↓` and `↵` pick a result. Drag the sidebar's edge to resize it.
+
+The toolbar above the story switches between the `modes` of your snapshot
+config and can show all of them side by side, so a dark theme is one click
+away and never needs a toggle inside a story. It also sizes the story to one
+of your snapshot `viewports` or a phone/tablet preset. The URL keeps the
+story, mode and viewport, so a link opens the same view.
+
+| Key | |
+| --- | --- |
+| `⌘K` / `ctrl+K` | search |
+| `⌥↑` / `⌥↓` | previous / next story |
+| `r` | reload the story |
+
+The keys work while the story has focus, too.
+
+Each story renders alone in an iframe (`/frame.html?story=<key>`), so its
+global styles, portals and overlays stay out of the sidebar. The "open in new
+tab" button opens that page directly.
+
+A mode's `colorScheme` is emulated inside the frame: `matchMedia` answers for
+it, and `@media (prefers-color-scheme: …)` rules in same-origin stylesheets
+are rewritten to match. Browsers offer no page-level switch for the setting,
+so rules a stylesheet adds later through `insertRule`, and cross-origin
+stylesheets, keep following the system. A theme provider that prefers a
+choice saved in `localStorage` over the system setting will still show the
+saved theme; in snapshots every run starts with empty storage.
+
 ## Configuration
 
 Create `storybun.config.ts` in your project root:
@@ -76,7 +112,8 @@ export default {
   // Bun plugins applied during build
   plugins: [],
 
-  // Override UI components
+  // Override UI components. Layout and Sidebar render in the dev UI; the
+  // Wrapper renders inside the story iframe, around every story.
   components: {
     Layout: "./src/storybun/Layout.tsx",
     Sidebar: "./src/storybun/Sidebar.tsx",

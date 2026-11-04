@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ancestorIds, buildTree, searchStories, splitKey, storyLeaves } from "./tree.ts";
+import { ancestorIds, buildTree, nestExports, searchStories, splitKey, storyLeaves } from "./tree.ts";
 
 const stories = [
   { path: "@acme/app/src/features/billing/invoice-list", exports: ["InvoiceList", "InvoiceListEmpty"] },
@@ -84,4 +84,31 @@ describe("searchStories", () => {
 test("splitKey separates the file path from the export", () => {
   expect(splitKey("a/b/c--D")).toEqual({ path: "a/b/c", name: "D" });
   expect(splitKey("plain")).toEqual({ path: "", name: "plain" });
+});
+
+describe("nestExports", () => {
+  const nest = (names: string[]) => {
+    const flat = (nodes: ReturnType<typeof nestExports>): unknown[] =>
+      nodes.map((n) => (n.children.length ? [n.label, flat(n.children)] : n.label));
+    return flat(nestExports(names.map((name) => ({ key: `f--${name}`, name, path: "f" }))));
+  };
+
+  test("states of a component nest under it, labelled by what they add", () => {
+    expect(nest(["Modal", "ModalEditArmed", "ModalDisabledNfs"])).toEqual([["Modal", ["EditArmed", "DisabledNfs"]]]);
+  });
+
+  test("nests under the longest existing prefix, several levels deep", () => {
+    expect(nest(["List", "ListDeleted", "ListDeletedTruncated", "ListEmpty"])).toEqual([
+      ["List", [["Deleted", ["Truncated"]], "Empty"]],
+    ]);
+  });
+
+  test("only at a word boundary, and only under an export that exists", () => {
+    expect(nest(["Button", "Buttons", "Badge2", "Badge"])).toEqual(["Button", "Buttons", ["Badge", ["2"]]]);
+    expect(nest(["CardEmpty", "CardFull"])).toEqual(["CardEmpty", "CardFull"]);
+  });
+
+  test("keeps export order within each level", () => {
+    expect(nest(["Row", "RowB", "Table", "RowA"])).toEqual([["Row", ["B", "A"]], "Table"]);
+  });
 });

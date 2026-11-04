@@ -586,6 +586,17 @@ html, body, #root {
   flex: 0 1 auto;
 }
 
+/* A component's states, indented under it. */
+.storybun-export-children {
+  margin-left: 14px;
+  padding-left: 2px;
+  border-left: 1px dashed var(--sb-border-strong);
+}
+
+.storybun-export-children .storybun-story-item {
+  font-size: 12px;
+}
+
 /* Search results: name on top, the file it lives in underneath. */
 .storybun-result .storybun-story-item {
   flex-direction: column;

@@ -109,3 +109,40 @@ export function searchStories(leaves: StoryLeaf[], query: string): StoryLeaf[] {
   scored.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   return scored.map(([, , leaf]) => leaf);
 }
+
+export interface ExportNode {
+  leaf: StoryLeaf;
+  /** The export name, or only the part after its parent's name when nested. */
+  label: string;
+  children: ExportNode[];
+}
+
+/**
+ * Nests the exports of one story file by name: an export goes under the
+ * longest other export of the file its name starts with, at a word boundary
+ * (`FileBrowserEmpty` under `FileBrowser`, shown as `Empty`). Exports
+ * written as one per state of a component then read as that component and
+ * its states. An export only nests under one that exists: two exports that
+ * merely share a prefix stay side by side.
+ */
+export function nestExports(stories: StoryLeaf[]): ExportNode[] {
+  const nodes = new Map(stories.map((leaf) => [leaf.name, { leaf, label: leaf.name, children: [] as ExportNode[] }]));
+  const roots: ExportNode[] = [];
+  for (const leaf of stories) {
+    const node = nodes.get(leaf.name)!;
+    let parent: ExportNode | undefined;
+    for (const other of stories) {
+      if (other.name.length >= leaf.name.length || !leaf.name.startsWith(other.name)) continue;
+      // A word boundary: "ButtonGhost" nests under "Button", "Buttons" does not.
+      if (!/[A-Z0-9_]/.test(leaf.name[other.name.length]!)) continue;
+      if (!parent || other.name.length > parent.leaf.name.length) parent = nodes.get(other.name);
+    }
+    if (parent) {
+      node.label = leaf.name.slice(parent.leaf.name.length).replace(/^_/, "");
+      parent.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  return roots;
+}

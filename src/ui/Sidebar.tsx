@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import type { StoryMeta } from "../types.ts";
-import { ancestorIds, buildTree, searchStories, storyLeaves, type StoryLeaf, type TreeNode } from "./tree.ts";
+import { ancestorIds, buildTree, nestExports, searchStories, storyLeaves, type ExportNode, type StoryLeaf, type TreeNode } from "./tree.ts";
 import { readStored, writeStored } from "./storage.ts";
 
 /** Search results beyond this are not rendered; the count still says how many matched. */
@@ -43,6 +43,32 @@ function StoryButton({
   );
 }
 
+/** A file's exports, the states of a component indented under it. */
+function ExportList({
+  nodes,
+  active,
+  onSelect,
+}: {
+  nodes: ExportNode[];
+  active: string;
+  onSelect: (key: string) => void;
+}) {
+  return (
+    <>
+      {nodes.map((n) => (
+        <div key={n.leaf.key} className="storybun-export">
+          <StoryButton leaf={n.leaf} label={n.label} active={active === n.leaf.key} onSelect={onSelect} />
+          {n.children.length > 0 && (
+            <div className="storybun-export-children">
+              <ExportList nodes={n.children} active={active} onSelect={onSelect} />
+            </div>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
 function TreeGroup({
   node,
   active,
@@ -72,9 +98,7 @@ function TreeGroup({
       </button>
       {open && (
         <div className="storybun-group-children">
-          {node.stories.map((leaf) => (
-            <StoryButton key={leaf.key} leaf={leaf} label={leaf.name} active={active === leaf.key} onSelect={onSelect} />
-          ))}
+          <ExportList nodes={nestExports(node.stories)} active={active} onSelect={onSelect} />
           {node.children.map((child) => (
             <TreeGroup key={child.id} node={child} active={active} expanded={expanded} onToggle={onToggle} onSelect={onSelect} />
           ))}

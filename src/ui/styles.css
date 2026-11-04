@@ -267,6 +267,11 @@ html, body, #root {
 }
 
 .storybun-group-label {
+  width: calc(100% - 12px);
+  border: none;
+  background: none;
+  text-align: left;
+  font-family: var(--sb-font-sans);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -357,31 +362,22 @@ html, body, #root {
 /* ---- Content Area ----
    No inheritable properties here — story content must be unstyled. */
 
-/* The content pane is the ONE scroll container for the story canvas. Any
-   wrapper -- the built-in one or a project's own -- sits inside it and only
-   has to be at least as tall as the pane (`min-height: 100%`, or a child
-   with `flex: 1`); the pane scrolls whatever overflows. With `overflow:
-   hidden` here, a story taller than the viewport was clipped at the bottom
-   and could not be scrolled at all when the project supplied its own Wrapper,
-   because nothing between the pane and the story was scrollable. */
+/* The content pane holds the toolbar and the canvas; the canvas scrolls. A
+   story renders in its own document inside an iframe, so nothing here can
+   leak into it, and the story's own scrolling happens inside the frame. */
 .storybun-content {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  overflow: auto;
+  overflow: hidden;
   background: var(--sb-bg);
-  animation: sb-fadeIn 0.3s ease;
+  font-family: var(--sb-font-sans);
+  color: var(--sb-text);
 }
 
-/* A flex item shrinks to its `min-height` by default, and a project wrapper
-   declaring `min-height: 100%` would be shrunk to exactly the pane's height
-   with the story spilling out of it (its background stopping at the fold).
-   The pane grows its children instead and scrolls the result. */
-.storybun-content > * {
-  flex-shrink: 0;
-}
-
+/* Inside the story frame: the built-in Wrapper fills the document and
+   scrolls with it. */
 /* Centers the story without trapping it: `align-items: center` on a flex
    container pushes an overflowing child equally past the top and bottom
    edges, and the part past the top edge can never be scrolled into view.
@@ -389,7 +385,7 @@ html, body, #root {
    zero once it overflows, so a tall story starts at the top of the pane and
    scrolls all the way down. */
 .storybun-wrapper {
-  flex: 1 0 auto;
+  box-sizing: border-box;
   min-height: 100%;
   display: flex;
   padding: 32px;
@@ -516,19 +512,291 @@ html, body, #root {
   to { opacity: 1; }
 }
 
-/* Staggered entry for sidebar tree items */
-.storybun-sidebar-tree > div {
-  animation: sb-fadeSlideIn 0.4s ease both;
+/* ---- Sidebar additions ---- */
+
+.storybun-layout.resizing {
+  cursor: col-resize;
+  user-select: none;
 }
-.storybun-sidebar-tree > div:nth-child(2) { animation-delay: 0.03s; }
-.storybun-sidebar-tree > div:nth-child(3) { animation-delay: 0.06s; }
-.storybun-sidebar-tree > div:nth-child(4) { animation-delay: 0.09s; }
-.storybun-sidebar-tree > div:nth-child(5) { animation-delay: 0.12s; }
-.storybun-sidebar-tree > div:nth-child(6) { animation-delay: 0.15s; }
-.storybun-sidebar-tree > div:nth-child(7) { animation-delay: 0.18s; }
-.storybun-sidebar-tree > div:nth-child(8) { animation-delay: 0.21s; }
-.storybun-sidebar-tree > div:nth-child(9) { animation-delay: 0.24s; }
-.storybun-sidebar-tree > div:nth-child(10) { animation-delay: 0.27s; }
+
+/* Iframes swallow pointer events; while dragging they must not. */
+.storybun-layout.resizing iframe {
+  pointer-events: none;
+}
+
+.storybun-resizer {
+  width: 5px;
+  margin: 0 -3px 0 -2px;
+  cursor: col-resize;
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+}
+
+.storybun-resizer:hover,
+.storybun-layout.resizing .storybun-resizer {
+  background: var(--sb-accent-subtle);
+}
+
+.storybun-sidebar-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 16px 6px;
+  font-size: 11px;
+  color: var(--sb-text-muted);
+  flex-shrink: 0;
+}
+
+.storybun-link {
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--sb-text-secondary);
+  cursor: pointer;
+  padding: 0;
+}
+
+.storybun-link:hover {
+  color: var(--sb-accent);
+}
+
+.storybun-group-name,
+.storybun-story-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storybun-group-count {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--sb-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.storybun-story-item {
+  min-width: 0;
+}
+
+.storybun-story-name {
+  flex: 0 1 auto;
+}
+
+/* Search results: name on top, the file it lives in underneath. */
+.storybun-result .storybun-story-item {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+}
+
+.storybun-story-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  font-size: 11px;
+  color: var(--sb-text-muted);
+}
+
+.storybun-result.cursor .storybun-story-item {
+  background: var(--sb-bg-hover);
+  color: var(--sb-text);
+  box-shadow: inset 0 0 0 1px var(--sb-border-strong);
+}
+
+.storybun-sidebar-note {
+  padding: 10px 16px;
+  font-size: 12px;
+  color: var(--sb-text-muted);
+}
+
+/* ---- Toolbar ---- */
+
+.storybun-toolbar {
+  height: var(--sb-topbar-height);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 12px 0 20px;
+  border-bottom: 1px solid var(--sb-border);
+  background: var(--sb-bg-sidebar);
+}
+
+.storybun-toolbar-title {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.storybun-toolbar-name {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.storybun-toolbar-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+  font-size: 12px;
+  color: var(--sb-text-muted);
+}
+
+.storybun-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.storybun-seg {
+  display: inline-flex;
+  border: 1px solid var(--sb-border-strong);
+  border-radius: var(--sb-radius-sm);
+  overflow: hidden;
+  margin-right: 6px;
+}
+
+.storybun-seg button {
+  border: none;
+  background: none;
+  font: 500 12px var(--sb-font-sans);
+  color: var(--sb-text-secondary);
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.storybun-seg button + button {
+  border-left: 1px solid var(--sb-border-strong);
+}
+
+.storybun-seg button:hover {
+  background: var(--sb-bg-hover);
+  color: var(--sb-text);
+}
+
+.storybun-seg button[aria-pressed="true"] {
+  background: var(--sb-accent-subtle);
+  color: var(--sb-accent);
+}
+
+.storybun-select {
+  font: 500 12px var(--sb-font-sans);
+  color: var(--sb-text-secondary);
+  background: var(--sb-bg);
+  border: 1px solid var(--sb-border-strong);
+  border-radius: var(--sb-radius-sm);
+  padding: 4px 6px;
+  margin-right: 6px;
+}
+
+.storybun-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--sb-radius-sm);
+  background: none;
+  color: var(--sb-text-secondary);
+  cursor: pointer;
+}
+
+.storybun-icon-button:hover {
+  background: var(--sb-bg-hover);
+  color: var(--sb-text);
+  border-color: var(--sb-border);
+}
+
+.storybun-toolbar :focus-visible {
+  outline: 2px solid var(--sb-accent);
+  outline-offset: 1px;
+}
+
+/* ---- Canvas ---- */
+
+.storybun-canvas {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: auto;
+}
+
+.storybun-frame-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.storybun-canvas.multi .storybun-frame-cell + .storybun-frame-cell {
+  border-left: 1px solid var(--sb-border-strong);
+}
+
+.storybun-frame-label {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--sb-text-muted);
+  border-bottom: 1px solid var(--sb-border);
+}
+
+.storybun-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  display: block;
+  background: transparent;
+}
+
+/* A fixed viewport: the frame keeps its size, centred, and the canvas
+   scrolls when it does not fit. */
+.storybun-canvas.fixed {
+  padding: 24px;
+  gap: 24px;
+  background:
+    radial-gradient(circle, var(--sb-border) 1px, transparent 1px) 0 0 / 16px 16px,
+    var(--sb-bg);
+}
+
+.storybun-canvas.fixed .storybun-frame-cell {
+  flex: 0 0 auto;
+  margin: auto;
+  border: none;
+}
+
+.storybun-canvas.fixed .storybun-frame-label {
+  border: none;
+  padding: 0 0 6px;
+}
+
+.storybun-canvas.fixed .storybun-frame {
+  flex: none;
+  border: 1px solid var(--sb-border-strong);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.storybun-empty-page {
+  flex: 1;
+  justify-content: center;
+}
 
 /* ---- Accessibility ---- */
 

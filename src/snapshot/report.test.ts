@@ -394,35 +394,37 @@ describe("HTML report", () => {
     const entry = html.slice(html.lastIndexOf('<div class="compare">', start), html.indexOf("</article>", start));
     expect(entry).toContain('class="pane pane-grid images cols-3"');
     expect(entry.match(/<input type="radio"/g)).toHaveLength(5);
-    expect(entry).toContain('class="t-slider" id="s1e0-slider" name="s1e0" checked=""');
-    expect(entry).toContain('<label class="l-slider" for="s1e0-slider">slider</label>');
-    expect(entry).toContain('<label class="l-grid" for="s1e0-grid">side by side</label>');
-    expect(entry).toContain('<label class="l-before" for="s1e0-before">before</label>');
-    expect(entry).toContain('<label class="l-after" for="s1e0-after">after</label>');
-    expect(entry).toContain('<label class="l-diff" for="s1e0-diff">diff</label>');
+    expect(entry).toContain('class="t-slider" id="changed-0-e0-slider" name="changed-0-e0" checked=""');
+    expect(entry).toContain('<label class="l-slider" for="changed-0-e0-slider">slider</label>');
+    expect(entry).toContain('<label class="l-grid" for="changed-0-e0-grid">side by side</label>');
+    expect(entry).toContain('<label class="l-before" for="changed-0-e0-before">before</label>');
+    expect(entry).toContain('<label class="l-after" for="changed-0-e0-after">after</label>');
+    expect(entry).toContain('<label class="l-diff" for="changed-0-e0-diff">diff</label>');
     expect(entry).toContain('class="pane pane-after single"');
     expect(entry).toContain('class="pane pane-diff single"');
   });
 
   test("radio groups are unique per entry across stories", async () => {
     const html = renderReportHtml(await mixedReport(), "");
-    const names = [...html.matchAll(/ name="(s\d+e\d+)"/g)].map((m) => m[1]);
+    const names = [...html.matchAll(/ name="([\w-]+-e\d+)"/g)].map((m) => m[1]);
     expect(new Set(names).size).toBe(2); // two changed entries in the fixture
   });
 
   test("the slider scales both images by the larger one, so a size change stays aligned at the top-left", async () => {
     const html = renderReportHtml(await mixedReport(), "");
     // Card--Wide light went from 300x150 to 300x200.
-    const start = html.indexOf('class="s-before" src="Components--Card--Wide-light.png"');
+    const start = html.indexOf('src="Components--Card--Wide-light.png" alt="before"');
     expect(start).toBeGreaterThan(-1);
-    const slider = html.slice(html.lastIndexOf('<div class="slider"', start), html.indexOf("</div></div>", start));
+    const slider = html.slice(html.lastIndexOf('<div class="slider"', start), html.indexOf('class="s-range"', start));
     expect(slider).toContain("aspect-ratio:300 / 200");
     expect(slider).toContain("max-width:300px");
-    expect(slider).toContain('class="s-before" src="Components--Card--Wide-light.png" alt="before" loading="lazy" style="width:100%"');
-    expect(slider).toContain('src="Components--Card--Wide-light.actual.png" alt="after" loading="lazy" style="width:100%"');
+    // Each image sits in its own side, clipped there by CSS, so a shorter
+    // image never shows the other one through its empty part.
+    expect(slider).toContain('<div class="s-side s-before"><img src="Components--Card--Wide-light.png" alt="before" loading="lazy" style="width:100%"/></div>');
+    expect(slider).toContain('<div class="s-side s-after"><img src="Components--Card--Wide-light.actual.png" alt="after" loading="lazy" style="width:100%"/></div>');
   });
 
-  test("filters and the full-screen view come from an inline script that reads the page, not the report", async () => {
+  test("the mode switch, the story filter and the full-screen view come from an inline script that reads the page, not the report", async () => {
     const report = await mixedReport();
     const html = renderReportHtml(report, "");
     const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
@@ -430,9 +432,11 @@ describe("HTML report", () => {
     for (const r of report.results) expect(scripts[0]).not.toContain(r.storyKey);
     // Everything the script drives is marked so it disappears without it.
     expect(html).toContain('<html lang="en" class="no-js">');
-    expect(html).toContain('<button type="button" class="chip js-only changed" data-status="changed" aria-pressed="true">');
     expect(html).toContain('<div class="seg js-only" role="group" aria-label="Mode">');
+    // Modes in config order, the first one active; there is no "all modes".
+    expect(html).toContain('<button type="button" data-mode="light" aria-pressed="true">light</button>');
     expect(html).toContain('<button type="button" data-mode="dark" aria-pressed="false">dark</button>');
+    expect(html).not.toContain('<button type="button" data-mode=""');
     expect(html).toContain('<dialog class="lb js-only"');
   });
 
@@ -459,7 +463,7 @@ describe("HTML report", () => {
     expect(html).toContain("the story rendered nothing with a measurable box");
   });
 
-  test("stories needing attention come first, fully passed ones are folded into a details element", async () => {
+  test("the top bar links to one section per status, attention first, passed folded into a details element", async () => {
     const report = await mixedReport();
     // A story whose every entry passed; it goes below the fold.
     report.results.unshift({
@@ -473,14 +477,22 @@ describe("HTML report", () => {
       error: null,
     });
     const html = renderReportHtml(report, "");
-    const fold = html.indexOf('<details class="quiet">');
-    expect(fold).toBeGreaterThan(-1);
-    expect(html).toContain("<summary>1 passed story</summary>");
-    expect(html.indexOf("Components/Badge--Small")).toBeGreaterThan(fold);
-    expect(html.indexOf("Components/Card--Wide")).toBeLessThan(fold);
-    // Button--Primary has a changed dark entry, so it sits above the fold
-    // even though its light entry passed.
-    expect(html.indexOf("Components/Button--Primary")).toBeLessThan(fold);
+    for (const id of ["changed", "new", "capture-failed", "removed", "passed"]) {
+      expect(html).toContain(`href="#${id}"`);
+    }
+    const at = (id: string) => html.indexOf(` id="${id}"`);
+    expect(at("changed")).toBeLessThan(at("new"));
+    expect(at("new")).toBeLessThan(at("capture-failed"));
+    expect(at("capture-failed")).toBeLessThan(at("removed"));
+    expect(at("removed")).toBeLessThan(at("passed"));
+    expect(html).toContain('<details id="passed" class="status-section folded"><summary><h2>Passed <span class="n">');
+    expect(html.indexOf("Components/Badge--Small")).toBeGreaterThan(at("passed"));
+    expect(html.indexOf("Components/Card--Wide")).toBeLessThan(at("passed"));
+    // Button--Primary's changed dark entry is in "changed", its passed light
+    // entry in "passed": each entry sits under its own status.
+    const primary = [...html.matchAll(/Components\/Button--Primary/g)].map((m) => m.index!);
+    expect(primary.some((i) => i < at("new"))).toBe(true);
+    expect(primary.some((i) => i > at("passed"))).toBe(true);
   });
 
   test("applies the image prefix to every src", async () => {
@@ -511,7 +523,8 @@ describe("HTML report", () => {
       now,
     });
     const html = renderReportHtml(report, "");
-    expect(html).toContain("<summary>2 updated stories</summary>");
+    expect(html).toContain('<details id="updated" class="status-section folded"><summary><h2>Updated <span class="n">4</span></h2></summary>');
+    expect(html).toContain('href="#updated"');
   });
 
   test("a custom template replaces the default page and receives the same props", async () => {

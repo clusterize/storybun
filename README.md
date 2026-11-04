@@ -307,23 +307,27 @@ Results are sorted by story key, then mode, then viewport. `summary.exitCode`
 is the exit code of the run, so a consumer never has to recompute it.
 
 `report.html` is one self-contained page: inline CSS and script, no external
-requests, readable in light and dark. Stories that need a look (changed, new,
-removed, capture failed) come first; passed stories are folded away. The
-captures of one story sit side by side, so its light and dark mode can be
-compared at a glance. A changed capture opens on a before/after slider, with
-tabs for before, after and diff in three columns, and for one image at a time
-in the same spot, so flipping between "before" and "after" makes the change
-jump out. Image paths are relative to the HTML file, so it works opened from
-`outDir` and served from a bucket next to the PNGs.
+requests, readable in light and dark. It has one section per status --
+changed, new, capture failed, removed -- linked from the top bar as plain
+anchors (`report.html#changed`); passed and updated captures are folded away
+at the end. A changed capture opens on a before/after slider, with tabs for
+before, after and diff in three columns, and for one image at a time in the
+same spot, so flipping between "before" and "after" makes the change jump
+out. Images are shown at full height and never scaled up. Image paths are
+relative to the HTML file, so it works opened from `outDir` and served from a
+bucket next to the PNGs.
 
-A sticky toolbar filters by status (alt-click shows one status alone), by mode
-when the run had more than one, and by story key. The filter lives in the URL,
-so a link to the report opens on the same view. Any image opens full screen,
-and from there the arrow keys step through every capture the filter shows:
+When the run had more than one mode, the page shows one at a time, full
+width; the switch (or `m`) changes it and the counts follow. The mode is kept
+in the query string (`report.html?mode=dark#changed`), so a link opens the
+same view. A filter box narrows the page to matching story keys. Any image
+opens full screen, and from there the arrow keys step through every capture
+on the page:
 
 | Key | Page | Full screen |
 | --- | --- | --- |
 | `/` | focus the story filter | |
+| `m` | next mode | |
 | `j` / `k` | next / previous story | next / previous capture |
 | `f`, `Enter` | open the current story full screen | |
 | `←` / `→` | | next / previous capture |
@@ -331,8 +335,9 @@ and from there the arrow keys step through every capture the filter shows:
 | `s` `g` `b` `a` `d` | | slider, side by side, before, after, diff |
 | `esc` | leave the filter | close |
 
-Without JavaScript the page still shows every image and the comparison tabs;
-only the filters, the slider's divider and the full-screen view need it.
+Without JavaScript the page still shows every image, every mode and the
+comparison tabs; only the mode switch, the filter, the slider's divider and
+the full-screen view need it.
 
 #### Custom HTML template
 

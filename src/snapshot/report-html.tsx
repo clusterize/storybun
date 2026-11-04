@@ -33,22 +33,18 @@ const STATUS_LABEL: Record<ReportStatus, string> = {
   updated: "updated",
 };
 
-/** Statuses a reviewer needs to look at; the rest is folded away. */
-const ATTENTION: ReadonlySet<ReportStatus> = new Set(["changed", "new", "removed", "capture-failed"]);
-
-/** Order of the status filters in the toolbar. */
-const STATUS_ORDER: ReportStatus[] = ["changed", "new", "removed", "capture-failed", "pass", "updated"];
-
 /**
- * An image taller than this is cut off in the page, with a fade, and shown
- * whole in the full-screen view. Without the cap one tall page story pushes
- * every other story a few screens down.
+ * The page's sections, in order, each with the anchor the top bar links to.
+ * The first four need a look and are open; the rest is folded away.
  */
-const SHOT_MAX_HEIGHT = 560;
-
-function needsAttention(entries: ReportEntry[]): boolean {
-  return entries.some((e) => ATTENTION.has(e.status));
-}
+const SECTIONS: { status: ReportStatus; id: string; title: string; folded: boolean }[] = [
+  { status: "changed", id: "changed", title: "Changed", folded: false },
+  { status: "new", id: "new", title: "New", folded: false },
+  { status: "capture-failed", id: "capture-failed", title: "Capture failed", folded: false },
+  { status: "removed", id: "removed", title: "Removed", folded: false },
+  { status: "updated", id: "updated", title: "Updated", folded: true },
+  { status: "pass", id: "passed", title: "Passed", folded: true },
+];
 
 function dims(d: { width: number; height: number } | null): string {
   return d ? `${d.width}×${d.height}` : "?";
@@ -66,8 +62,6 @@ function entryLabel(entry: ReportEntry): string {
 interface StoryGroup {
   storyKey: string;
   entries: ReportEntry[];
-  /** Position among all groups; the base of the ids the flip view needs. */
-  index: number;
 }
 
 function groupByStory(entries: ReportEntry[]): StoryGroup[] {
@@ -77,17 +71,13 @@ function groupByStory(entries: ReportEntry[]): StoryGroup[] {
     if (!list) groups.set(e.storyKey, (list = []));
     list.push(e);
   }
-  return [...groups.entries()].map(([storyKey, list], index) => ({ storyKey, entries: list, index }));
+  return [...groups.entries()].map(([storyKey, list]) => ({ storyKey, entries: list }));
 }
 
 /** `a/b/File--Export` → `["a/b/File", "Export"]`; a key without `--` is all name. */
 function splitStoryKey(storyKey: string): [string, string] {
   const at = storyKey.lastIndexOf("--");
   return at === -1 ? ["", storyKey] : [storyKey.slice(0, at), storyKey.slice(at + 2)];
-}
-
-function isTall(d: ReportDimensions | null): boolean {
-  return d !== null && d.height > SHOT_MAX_HEIGHT;
 }
 
 /**
@@ -113,7 +103,7 @@ function Image({
   return (
     <figure>
       <figcaption>{caption}</figcaption>
-      <div className={`shot${isTall(d) ? " tall" : ""}`}>
+      <div className="shot">
         <Img src={`${prefix}${file}`} alt={caption} d={d} />
       </div>
     </figure>
@@ -121,10 +111,12 @@ function Image({
 }
 
 /**
- * Before and after stacked in one box, the after image clipped to the right
- * of a draggable divider. Both are scaled by the same factor, measured
- * against the larger of the two, so a story that changed size stays aligned
- * at its top-left corner instead of being stretched to fit.
+ * Before and after in one box with a draggable divider: before shows left of
+ * it, after right of it. Each image is clipped to its own side, so where one
+ * is shorter than the other the box shows the empty checkerboard below it,
+ * never the other image peeking through. Both are scaled by the same factor,
+ * measured against the larger of the two, so a story that changed size stays
+ * aligned at its top-left corner instead of being stretched to fit.
  */
 function Slider({ entry, prefix }: { entry: ReportEntry; prefix: string }) {
   const { files, dimensions } = entry;
@@ -133,17 +125,19 @@ function Slider({ entry, prefix }: { entry: ReportEntry; prefix: string }) {
   const box = b && a ? { width: Math.max(b.width, a.width), height: Math.max(b.height, a.height) } : (a ?? b);
   const pct = (d: ReportDimensions | null) => (d && box ? `${(d.width / box.width) * 100}%` : "100%");
   return (
-    <div className={`shot${isTall(box) ? " tall" : ""}`}>
+    <div className="shot">
       <div
-        className="slider"
+        className={box ? "slider" : "slider no-box"}
         style={{
           ["--pos" as string]: "50%",
           aspectRatio: box ? `${box.width} / ${box.height}` : undefined,
           maxWidth: box ? `${box.width}px` : undefined,
         }}
       >
-        <img className="s-before" src={`${prefix}${files.baseline}`} alt="before" loading="lazy" style={{ width: pct(b) }} />
-        <div className="s-after">
+        <div className="s-side s-before">
+          <img src={`${prefix}${files.baseline}`} alt="before" loading="lazy" style={{ width: pct(b) }} />
+        </div>
+        <div className="s-side s-after">
           <img src={`${prefix}${files.actual}`} alt="after" loading="lazy" style={{ width: pct(a) }} />
         </div>
         <span className="s-tag s-tag-before">before</span>
@@ -196,7 +190,7 @@ function Comparison({ uid, entry, prefix }: { uid: string; entry: ReportEntry; p
         ([key, label, file, d]) =>
           file && (
             <div key={key} className={`pane pane-${key} single`}>
-              <div className={`shot${isTall(d) ? " tall" : ""}`}>
+              <div className="shot">
                 <Img src={`${prefix}${file}`} alt={label} d={d} />
               </div>
             </div>
@@ -236,7 +230,7 @@ function Entry({ uid, entry, prefix }: { uid: string; entry: ReportEntry; prefix
           <span className="detail error">{entry.error}</span>
         )}
         {hasImage && (
-          <button type="button" className="expand js-only" title="Full screen (click an image, too)" aria-label="Full screen">
+          <button type="button" className="expand js-only" title="Full screen (or click the image)" aria-label="Full screen">
             {EXPAND_ICON}
           </button>
         )}
@@ -258,21 +252,21 @@ function Entry({ uid, entry, prefix }: { uid: string; entry: ReportEntry; prefix
   );
 }
 
-function Story({ group, prefix }: { group: StoryGroup; prefix: string }) {
+function Story({ group, prefix, id }: { group: StoryGroup; prefix: string; id: string }) {
   const [path, name] = splitStoryKey(group.storyKey);
   return (
-    <article className="story" id={`story-${group.index}`} data-key={group.storyKey.toLowerCase()}>
-      <h2>
-        <a href={`#story-${group.index}`} className="anchor">
+    <article className="story" id={id} data-key={group.storyKey.toLowerCase()}>
+      <h3>
+        <a href={`#${id}`} className="anchor">
           <span className="name">{name}</span>
           {path && <span className="path">{path}</span>}
         </a>
         {/* The full key, unsplit, for searching the page and for copying. */}
         <span className="key">{group.storyKey}</span>
-      </h2>
+      </h3>
       <div className="entries">
         {group.entries.map((entry, i) => (
-          <Entry key={i} uid={`s${group.index}e${i}`} entry={entry} prefix={prefix} />
+          <Entry key={i} uid={`${id}-e${i}`} entry={entry} prefix={prefix} />
         ))}
       </div>
     </article>
@@ -294,12 +288,14 @@ const CSS = `
   }
 }
 * { box-sizing: border-box; }
+html { scroll-padding-top: 112px; }
 body { margin: 0; background: var(--bg); color: var(--fg);
   font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-.no-js .js-only, .js .no-js-chip { display: none !important; }
+.no-js .js-only { display: none !important; }
 button { font: inherit; color: inherit; }
+a { color: inherit; }
 
-/* Toolbar */
+/* Top bar */
 .top { position: sticky; top: 0; z-index: 10; background: var(--bar); backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--line); padding: 12px 24px; }
 .top-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
@@ -308,36 +304,44 @@ h1 { font-size: 17px; margin: 0; }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 10px; }
 .counts { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 12px;
-  background: var(--card); border: 1px solid var(--line); }
+  background: var(--card); border: 1px solid var(--line); text-decoration: none; }
+a.chip:hover { border-color: var(--muted); }
 .chip.zero { color: var(--muted); }
-button.chip { cursor: pointer; }
-button.chip[aria-pressed="false"] { opacity: .45; }
-button.chip[aria-pressed="false"] .dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .chip.changed .dot { background: var(--changed); } .chip.new .dot { background: var(--new); }
 .chip.removed .dot { background: var(--removed); } .chip.capture-failed .dot { background: var(--failed); }
 .chip.pass .dot, .chip.updated .dot { background: var(--pass); }
+.chip.zero .dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .seg button { border: 0; background: none; padding: 3px 12px; cursor: pointer; color: var(--muted); }
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
 .search { padding: 4px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
   color: var(--fg); font: inherit; min-width: 220px; flex: 0 1 320px; }
-.shown { color: var(--muted); font-size: 12px; margin-left: auto; }
-.hint { color: var(--muted); font-size: 12px; }
+.hint { color: var(--muted); font-size: 12px; margin-left: auto; }
 kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px;
   border-radius: 4px; padding: 0 4px; }
 button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
-/* Stories */
+/* Sections and stories */
 main { padding: 0 24px 64px; }
-.story { border-bottom: 1px solid var(--line); padding: 16px 0; scroll-margin-top: 120px; }
-.story.current > h2 .name { text-decoration: underline; text-decoration-color: var(--focus); text-underline-offset: 4px; }
-h2 { font-size: 15px; margin: 0 0 8px; font-weight: 600; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
-h2 .anchor { color: inherit; text-decoration: none; display: contents; }
-h2 .path { color: var(--muted); font-weight: 400; font-size: 12px; word-break: break-all; }
-h2 .key { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.entries { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr)); align-items: start; }
+.status-section { padding-top: 8px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; margin: 16px 0 0; padding-bottom: 6px;
+  border-bottom: 2px solid var(--line); display: flex; align-items: baseline; gap: 8px; }
+h2 .n { color: var(--muted); font-weight: 400; }
+#changed h2 { border-color: var(--changed); } #new h2 { border-color: var(--new); }
+#capture-failed h2 { border-color: var(--failed); } #removed h2 { border-color: var(--removed); }
+details.folded > summary { cursor: pointer; list-style: none; }
+details.folded > summary::-webkit-details-marker { display: none; }
+details.folded > summary h2::before { content: "▸"; color: var(--muted); }
+details.folded[open] > summary h2::before { content: "▾"; }
+.story { border-bottom: 1px solid var(--line); padding: 16px 0; }
+.story.current > h3 .name { text-decoration: underline; text-decoration-color: var(--focus); text-underline-offset: 4px; }
+h3 { font-size: 15px; margin: 0 0 8px; font-weight: 600; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+h3 .anchor { text-decoration: none; display: contents; }
+h3 .path { color: var(--muted); font-weight: 400; font-size: 12px; word-break: break-all; }
+h3 .key { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.entries { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
 .entry { background: var(--card); border-radius: 8px; padding: 10px 12px; min-width: 0; }
 .entry-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 8px; }
 .expand { margin-left: auto; border: 1px solid var(--line); background: var(--bg); border-radius: 6px;
@@ -360,12 +364,6 @@ figure { margin: 0; min-width: 0; }
 figcaption { color: var(--muted); font-size: 12px; margin: 0 0 4px; }
 img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line);
   background: repeating-conic-gradient(var(--line) 0 25%, transparent 0 50%) 0 0 / 16px 16px; }
-.shot { position: relative; }
-.shot.tall { max-height: ${SHOT_MAX_HEIGHT}px; overflow: hidden; }
-.shot.tall::after { content: "taller than shown · open full screen"; position: absolute; inset: auto 0 0 0;
-  height: 64px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 8px;
-  font-size: 12px; color: var(--muted); pointer-events: none;
-  background: linear-gradient(transparent, var(--card) 85%); }
 .js .shot img { cursor: zoom-in; }
 
 /* Comparison tabs */
@@ -389,22 +387,23 @@ img { display: block; max-width: 100%; height: auto; border: 1px solid var(--lin
 .compare > input.t-diff:checked ~ .tabs .l-diff { color: var(--fg); border-bottom-color: var(--fg); font-weight: 600; }
 .single { grid-template-columns: minmax(0, 1fr); }
 
-/* Before/after slider */
+/* Before/after slider: each side clipped to its half of the divider */
 .slider { position: relative; width: 100%; border: 1px solid var(--line); overflow: hidden;
   background: repeating-conic-gradient(var(--line) 0 25%, transparent 0 50%) 0 0 / 16px 16px; }
+.s-side { position: absolute; inset: 0; }
+.s-before { clip-path: inset(0 calc(100% - var(--pos)) 0 0); }
+.s-after { clip-path: inset(0 0 0 var(--pos)); }
 .slider img { position: absolute; top: 0; left: 0; max-width: none; height: auto; border: 0; background: none; }
-.slider .s-before { position: relative; }
-.s-after { position: absolute; inset: 0; clip-path: inset(0 0 0 var(--pos)); }
 .slider::after { content: ""; position: absolute; top: 0; bottom: 0; left: var(--pos); width: 2px;
   margin-left: -1px; background: var(--focus); box-shadow: 0 0 0 1px rgba(0,0,0,.25); pointer-events: none; }
+/* Sizes unknown (a PNG header could not be read): the before image gives the box its height. */
+.slider.no-box .s-before, .slider.no-box .s-before img { position: relative; }
 .s-range { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; }
 .s-tag { position: absolute; top: 6px; font-size: 11px; padding: 0 6px; border-radius: 4px;
   background: rgba(0,0,0,.6); color: #fff; pointer-events: none; }
 .s-tag-before { left: 6px; } .s-tag-after { right: 6px; }
 .no-js .s-range { display: none; }
 
-details.quiet { padding: 12px 0; }
-details.quiet > summary { cursor: pointer; font-weight: 600; }
 [hidden] { display: none !important; }
 
 /* Full-screen view */
@@ -416,27 +415,28 @@ details.quiet > summary { cursor: pointer; font-weight: 600; }
 .lb-title { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lb-title .path { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 8px; }
 .lb-pos { color: var(--muted); font-size: 12px; white-space: nowrap; }
-.lb-bar .hint { margin-left: auto; white-space: nowrap; }
+.lb-bar .hint { white-space: nowrap; }
 .lb-bar button { border: 1px solid var(--line); background: var(--card); border-radius: 6px; padding: 2px 10px; cursor: pointer; }
 .lb-body { flex: 1; overflow: auto; padding: 16px; }
 .lb-body .entry { background: none; padding: 0; }
 .lb-body .entry-head .expand { display: none; }
-.lb-body .shot.tall { max-height: none; overflow: visible; }
-.lb-body .shot.tall::after { display: none; }
 .lb-body .shot img { cursor: default; }
 .lb-body .images.cols-1 img, .lb-body .single img { margin: 0 auto; }
 .lb-body .slider { margin: 0 auto; }
 @media (max-width: 720px) {
   .top, main { padding-left: 16px; padding-right: 16px; }
-  .lb-bar .hint { display: none; }
+  .hint { display: none; }
 }
 `;
 
 /**
  * The page script. Everything it adds sits on top of a page that already
- * works without it: the filters, the slider's divider, the full-screen view
- * and the keyboard shortcuts. It reads only the DOM, never report data, so
- * nothing from a story key can end up in it.
+ * works without it: the mode switch, the story filter, the slider's divider,
+ * the full-screen view and the keyboard shortcuts. It reads only the DOM,
+ * never report data, so nothing from a story key can end up in it.
+ *
+ * The URL fragment is left to the section and story anchors; the mode goes
+ * in the query string (`?mode=dark`), so a shared link keeps both.
  */
 const SCRIPT = `
 (function () {
@@ -448,75 +448,63 @@ const SCRIPT = `
   var main = $("main");
   var entries = $$("main .entry");
   var stories = $$("main .story");
-  var chips = $$("button.chip[data-status]");
+  var sections = $$("main .status-section");
   var modeButtons = $$(".seg button[data-mode]");
+  var modes = modeButtons.map(function (b) { return b.dataset.mode; });
   var search = $(".search");
-  var shown = $(".shown");
-  var quiet = $("details.quiet");
 
-  var available = chips.map(function (c) { return c.dataset.status; });
-  var attention = available.filter(function (s) { return s !== "pass" && s !== "updated"; });
-  var state = { status: new Set(attention.length ? attention : available), mode: "", q: "" };
-
-  function readHash() {
-    var p = new URLSearchParams(location.hash.slice(1));
-    if (p.has("status")) state.status = new Set(p.get("status").split(",").filter(Boolean));
-    if (p.has("mode")) state.mode = p.get("mode");
-    if (p.has("q")) state.q = p.get("q");
+  var params = new URLSearchParams(location.search);
+  var mode = "";
+  if (modes.length) {
+    var stored = null;
+    try { stored = localStorage.getItem("storybun-report-mode"); } catch (e) {}
+    mode = [params.get("mode"), stored, modes[0]].filter(function (m) { return m && modes.indexOf(m) !== -1; })[0];
   }
-  function writeHash() {
-    var p = new URLSearchParams();
-    p.set("status", Array.from(state.status).join(","));
-    if (state.mode) p.set("mode", state.mode);
-    if (state.q) p.set("q", state.q);
-    history.replaceState(null, "", "#" + p.toString());
-  }
+  var q = "";
 
   function apply() {
-    var q = state.q.trim().toLowerCase().split(/\\s+/).filter(Boolean);
-    var counts = {};
-    var visibleStories = 0;
+    var terms = q.trim().toLowerCase().split(/\\s+/).filter(Boolean);
     stories.forEach(function (story) {
       var key = story.dataset.key;
-      var matches = q.every(function (t) { return key.indexOf(t) !== -1; });
+      var matches = terms.every(function (t) { return key.indexOf(t) !== -1; });
       var any = false;
       $$(".entry", story).forEach(function (e) {
-        var inMode = !state.mode || e.dataset.mode === state.mode;
-        if (matches && inMode) counts[e.dataset.status] = (counts[e.dataset.status] || 0) + 1;
-        var show = matches && inMode && state.status.has(e.dataset.status);
+        var show = matches && (!mode || e.dataset.mode === mode);
         e.hidden = !show;
         any = any || show;
       });
       story.hidden = !any;
-      if (any) visibleStories++;
     });
-    chips.forEach(function (c) {
-      var s = c.dataset.status;
-      c.setAttribute("aria-pressed", String(state.status.has(s)));
-      $(".n", c).textContent = counts[s] || 0;
+    sections.forEach(function (section) {
+      var n = $$(".entry", section).filter(function (e) { return !e.hidden; }).length;
+      $("h2 .n", section).textContent = n;
+      var link = $('.counts a[href="#' + section.id + '"]');
+      if (link) {
+        $(".n", link).textContent = n;
+        link.classList.toggle("zero", n === 0);
+      }
+      section.hidden = n === 0;
     });
-    modeButtons.forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.mode === state.mode)); });
-    if (quiet) {
-      quiet.hidden = !$$(".story", quiet).some(function (s) { return !s.hidden; });
-      if (state.status.has("pass") || state.status.has("updated") || q.length) quiet.open = true;
+    modeButtons.forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.mode === mode)); });
+    if (mode) {
+      params.set("mode", mode);
+      history.replaceState(null, "", "?" + params.toString() + location.hash);
+      try { localStorage.setItem("storybun-report-mode", mode); } catch (e) {}
     }
-    shown.textContent = visibleStories + " of " + stories.length + " stories";
-    writeHash();
   }
 
-  chips.forEach(function (c) {
-    c.addEventListener("click", function (ev) {
-      var s = c.dataset.status;
-      if (ev.altKey || ev.metaKey || ev.ctrlKey) state.status = new Set([s]);
-      else if (state.status.has(s)) state.status.delete(s);
-      else state.status.add(s);
-      apply();
-    });
-  });
   modeButtons.forEach(function (b) {
-    b.addEventListener("click", function () { state.mode = b.dataset.mode; apply(); });
+    b.addEventListener("click", function () { mode = b.dataset.mode; apply(); });
   });
-  if (search) search.addEventListener("input", function () { state.q = search.value; apply(); });
+  if (search) search.addEventListener("input", function () { q = search.value; apply(); });
+
+  // A link into a folded section opens it.
+  function openTarget() {
+    var t = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    var d = t && (t.tagName === "DETAILS" ? t : t.closest("details"));
+    if (d && !d.open) { d.open = true; t.scrollIntoView(); }
+  }
+  window.addEventListener("hashchange", openTarget);
 
   // Slider divider: a transparent range input over the image.
   document.addEventListener("input", function (ev) {
@@ -534,13 +522,18 @@ const SCRIPT = `
   // over to the next entry, so stepping through changes in "before" or
   // "diff" stays in it.
   var view = null;
+  var list = [];
+  function pickTab(root, key) {
+    var r = $("input.t-" + key, root);
+    if (r) { r.checked = true; if (root === lbBody) view = key; return true; }
+    return false;
+  }
   function visibleEntries() {
     return entries.filter(function (e) {
       var d = e.closest("details");
       return !e.closest("[hidden]") && (!d || d.open) && $(".shot", e);
     });
   }
-  var list = [];
   function show(i) {
     if (!list.length) return;
     current = (i + list.length) % list.length;
@@ -561,10 +554,10 @@ const SCRIPT = `
     var title = $(".lb-title", lb);
     title.replaceChildren();
     var name = document.createElement("span");
-    name.textContent = $("h2 .name", story).textContent;
+    name.textContent = $("h3 .name", story).textContent;
     var path = document.createElement("span");
     path.className = "path";
-    path.textContent = ($("h2 .path", story) || { textContent: "" }).textContent;
+    path.textContent = ($("h3 .path", story) || { textContent: "" }).textContent;
     title.append(name, path);
     $(".lb-pos", lb).textContent = (current + 1) + " / " + list.length;
     story.scrollIntoView({ block: "nearest" });
@@ -587,26 +580,21 @@ const SCRIPT = `
   $(".lb-close", lb).addEventListener("click", function () { lb.close(); });
   lb.addEventListener("close", function () { lbBody.replaceChildren(); });
   lbBody.addEventListener("change", function (ev) {
-    var m = /(?:^| )t-(\w+)/.exec(ev.target.className || "");
+    var m = /(?:^| )t-(\\w+)/.exec(ev.target.className || "");
     if (m) view = m[1];
   });
 
   // Keyboard
   var storyCursor = -1;
-  function pickTab(root, key) {
-    var r = $("input.t-" + key, root);
-    if (r) { r.checked = true; if (root === lbBody) view = key; return true; }
-    return false;
-  }
+  var VIEWS = { s: "slider", g: "grid", b: "before", a: "after", d: "diff" };
   document.addEventListener("keydown", function (ev) {
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
     var typing = ev.target.matches && ev.target.matches("input[type=search], input[type=text]");
     if (lb.open) {
       if (ev.key === "ArrowRight" || ev.key === "j") { show(current + 1); ev.preventDefault(); }
       else if (ev.key === "ArrowLeft" || ev.key === "k") { show(current - 1); ev.preventDefault(); }
-      else if ({ s: "slider", g: "grid", b: "before", a: "after", d: "diff" }[ev.key]) {
-        pickTab(lbBody, { s: "slider", g: "grid", b: "before", a: "after", d: "diff" }[ev.key]);
-      } else if (ev.key === " ") {
+      else if (VIEWS[ev.key]) pickTab(lbBody, VIEWS[ev.key]);
+      else if (ev.key === " ") {
         // Space flips between before and after in place.
         var after = $("input.t-after", lbBody);
         if (after) { pickTab(lbBody, after.checked ? "before" : "after"); ev.preventDefault(); }
@@ -618,8 +606,14 @@ const SCRIPT = `
       return;
     }
     if (ev.key === "/") { search.focus(); search.select(); ev.preventDefault(); }
-    else if (ev.key === "j" || ev.key === "k") {
-      var vis = stories.filter(function (s) { return !s.hidden && !s.closest("[hidden]") && (!s.closest("details") || s.closest("details").open); });
+    else if (ev.key === "m" && modes.length > 1) {
+      mode = modes[(modes.indexOf(mode) + 1) % modes.length];
+      apply();
+    } else if (ev.key === "j" || ev.key === "k") {
+      var vis = stories.filter(function (s) {
+        var d = s.closest("details");
+        return !s.closest("[hidden]") && (!d || d.open);
+      });
       if (!vis.length) return;
       var cur = vis.indexOf(stories[storyCursor]);
       cur = ev.key === "j" ? Math.min(cur + 1, vis.length - 1) : Math.max(cur - 1, 0);
@@ -634,31 +628,23 @@ const SCRIPT = `
     }
   });
 
-  readHash();
-  if (search) search.value = state.q;
   apply();
+  openTarget();
 })();
 `;
 
 /** The built-in report page. Exported so a custom template can wrap or reuse it. */
 export function DefaultReport({ report, imagePrefix }: ReportTemplateProps) {
-  const { summary, config } = report;
-  const groups = groupByStory(report.results);
-  const attention = groups.filter((g) => needsAttention(g.entries));
-  const quiet = groups.filter((g) => !needsAttention(g.entries));
+  const { config } = report;
 
-  const totals: Record<ReportStatus, number> = {
-    pass: summary.passed,
-    changed: summary.changed,
-    new: summary.new,
-    removed: summary.removed,
-    "capture-failed": summary.captureFailed,
-    updated: summary.updated,
-  };
-  const statuses = STATUS_ORDER.filter((s) => totals[s] > 0 || s === "pass" || s === "changed");
+  // Modes in config order; one is shown at a time once the script runs.
+  const seen = new Set(report.results.map((r) => r.mode).filter((m): m is string => m !== null));
+  const modes = [...config.modes.filter((m) => seen.has(m)), ...[...seen].filter((m) => !config.modes.includes(m))];
 
-  // Modes as the run captured them; only offered as a filter when there is a choice.
-  const modes = [...new Set(report.results.map((r) => r.mode).filter((m): m is string => m !== null))];
+  const sections = SECTIONS.map((s) => {
+    const entries = report.results.filter((r) => r.status === s.status);
+    return { ...s, entries, groups: groupByStory(entries) };
+  }).filter((s) => s.entries.length > 0 || s.status === "changed");
 
   const meta: string[] = [];
   if (report.commit) meta.push(`commit ${report.commit.slice(0, 7)}`);
@@ -666,8 +652,6 @@ export function DefaultReport({ report, imagePrefix }: ReportTemplateProps) {
   if (config.maxDiffPixels > 0) meta.push(`up to ${config.maxDiffPixels} differing pixels tolerated`);
   if (config.clock) meta.push(`clock frozen at ${config.clock}`);
   meta.push(`generated ${report.generatedAt}`);
-
-  const quietLabel = summary.updated > 0 ? "updated" : "passed";
 
   return (
     <html lang="en" className="no-js">
@@ -685,55 +669,65 @@ export function DefaultReport({ report, imagePrefix }: ReportTemplateProps) {
             <h1>Snapshot report</h1>
             <p className="meta">{meta.join(" · ")}</p>
           </div>
-          <div className="controls">
-            {/* Plain counts without the script; filter toggles with it. */}
+          <nav className="controls" aria-label="Report">
             <ul className="counts">
-              {statuses.map((s) => (
-                <li key={s}>
-                  <span className={`chip no-js-chip ${totals[s] === 0 ? "zero" : s}`}>
-                    {totals[s]} {STATUS_LABEL[s]}
-                  </span>
-                  <button type="button" className={`chip js-only ${s}`} data-status={s} aria-pressed="true">
+              {sections.map((s) => (
+                <li key={s.id}>
+                  <a href={`#${s.id}`} className={`chip ${s.entries.length === 0 ? "zero" : s.status}`}>
                     <span className="dot" />
-                    <span className="n">{totals[s]}</span> {STATUS_LABEL[s]}
-                  </button>
+                    <span className="n">{s.entries.length}</span> {STATUS_LABEL[s.status]}
+                  </a>
                 </li>
               ))}
             </ul>
             {modes.length > 1 && (
               <div className="seg js-only" role="group" aria-label="Mode">
-                <button type="button" data-mode="" aria-pressed="true">
-                  all modes
-                </button>
-                {modes.map((m) => (
-                  <button key={m} type="button" data-mode={m} aria-pressed="false">
+                {modes.map((m, i) => (
+                  <button key={m} type="button" data-mode={m} aria-pressed={i === 0 ? "true" : "false"}>
                     {m}
                   </button>
                 ))}
               </div>
             )}
             <input type="search" className="search js-only" placeholder="Filter stories  ( / )" aria-label="Filter stories" />
-            <span className="shown js-only" />
             <span className="hint js-only">
-              <kbd>j</kbd>/<kbd>k</kbd> story · <kbd>f</kbd> full screen · alt-click a status to show only it
+              <kbd>j</kbd>/<kbd>k</kbd> story · <kbd>f</kbd> full screen{modes.length > 1 ? " · " : ""}
+              {modes.length > 1 && (
+                <>
+                  <kbd>m</kbd> mode
+                </>
+              )}
             </span>
-          </div>
+          </nav>
         </header>
         <main>
-          {attention.map((group) => (
-            <Story key={group.storyKey} group={group} prefix={imagePrefix} />
-          ))}
-          {quiet.length > 0 && (
-            <details className="quiet">
-              <summary>
-                {quiet.length} {quietLabel} {quiet.length === 1 ? "story" : "stories"}
-              </summary>
-              {quiet.map((group) => (
-                <Story key={group.storyKey} group={group} prefix={imagePrefix} />
-              ))}
-            </details>
-          )}
-          {groups.length === 0 && <p className="meta">No stories in this run.</p>}
+          {sections.map((s) => {
+            const heading = (
+              <h2>
+                {s.title} <span className="n">{s.entries.length}</span>
+              </h2>
+            );
+            const body =
+              s.groups.length > 0 ? (
+                s.groups.map((group, i) => (
+                  <Story key={group.storyKey} group={group} prefix={imagePrefix} id={`${s.id}-${i}`} />
+                ))
+              ) : (
+                <p className="meta">Nothing {STATUS_LABEL[s.status]}.</p>
+              );
+            return s.folded ? (
+              <details key={s.id} id={s.id} className="status-section folded">
+                <summary>{heading}</summary>
+                {body}
+              </details>
+            ) : (
+              <section key={s.id} id={s.id} className="status-section">
+                {heading}
+                {body}
+              </section>
+            );
+          })}
+          {report.results.length === 0 && <p className="meta">No stories in this run.</p>}
         </main>
         <dialog className="lb js-only" aria-label="Full-screen view">
           <div className="lb-bar">

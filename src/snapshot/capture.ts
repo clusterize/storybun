@@ -47,7 +47,7 @@ export interface CaptureOutcome {
 // that enabling neither feature never renames a baseline. Each extra axis
 // appends its own suffix, viewport before mode, so a project that turns on
 // modes re-baselines exactly once (`X.png` -> `X-light.png`, `X-dark.png`).
-function storyOutputPath(
+export function storyOutputPath(
   outDir: string,
   storyPath: string,
   exportName: string,

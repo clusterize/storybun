@@ -12,6 +12,7 @@ A fast, zero-config component explorer built on [Bun](https://bun.sh). Think Sto
 - **Style isolation** — Each story renders in its own iframe: its global CSS, portals and overlays stay out of the UI around it
 - **Modes and viewports** — Switch the story between your snapshot `modes` (light/dark), or show them side by side, at any viewport
 - **Dark/light theme** — The UI itself follows system preference
+- **Component catalogue** — `storybun components` lists and searches the components your stories show, with import paths, doc comments and variants
 
 ## Quick Start
 
@@ -44,6 +45,7 @@ storybun                       Start the dev server
 storybun snapshot [options]    Capture every story and compare against its baseline
 storybun list [options]        Print every story key
 storybun shot <story> [opts]   Write a PNG of one story, leaving baselines untouched
+storybun components [query]    List the components stories demonstrate, or search them
 ```
 
 ## Story Format
@@ -94,6 +96,88 @@ so rules a stylesheet adds later through `insertRule`, and cross-origin
 stylesheets, keep following the system. A theme provider that prefers a
 choice saved in `localStorage` over the system setting will still show the
 saved theme; in snapshots every run starts with empty storage.
+
+## Component Catalogue
+
+Your stories already know which components exist and what they look like.
+`storybun components` turns that into a catalogue you, or a coding agent, can
+query from the terminal instead of grepping for a component and its import path:
+
+```bash
+storybun components                    # one line per component: name, import path, summary
+storybun components badge              # best matches in full
+storybun components "status label"     # free text: names, paths, doc comments, variants
+storybun components --json             # the whole catalogue, machine-readable
+```
+
+```
+Badge
+  import { Badge } from '@acme/kit/ui'
+  import { Badge } from '@/ui/badge'  (inside @acme/kit)
+  source  packages/kit/src/ui/badge.tsx:21
+
+  A short status label.
+
+  tone: plain* | danger
+    plain — Neutral facts: counts, labels.
+    danger — Something went wrong and needs a look.
+  size: sm | md*
+
+  stories
+    @acme/kit/Ui/Badge--Badge  — The default tone.
+    @acme/kit/Ui/Badge--BadgeDanger
+```
+
+Nothing is configured and nothing runs: the catalogue is read from source with
+the TypeScript parser (an optional peer dependency every `.tsx` project already
+has), in a few seconds for a few hundred story files.
+
+**Which component a story file shows.** A story file is credited with the
+components it imports from the module it is named after (`badge.stories.tsx`
+→ `./badge`), whether it renders them or hands them to a helper. If it imports
+none, it is credited with every component it renders from a relative import,
+except files that look like fixtures or harnesses (`_story-fixtures.tsx`,
+`*.fixture.ts`). Each story export is then listed under the components it
+actually renders. When a file only reaches its component through a harness,
+name it in a doc comment above the first import:
+
+```tsx
+/** @component JobBoard */
+import { Harness } from "./_story-fixtures";
+```
+
+`@component` takes a name imported by the file or exported by its same-named
+module, or `<specifier>#<Name>` (`@component ./board#JobBoard`). Files that
+show no component are counted on stderr.
+
+**What it reads.** Everything comes from comments you would write anyway:
+
+- **Description**: the doc comment on the component's declaration (`/** … */`
+  above `function Badge` or `export const Badge`), followed through barrels and
+  re-exports. `@deprecated` is shown first.
+- **Variants**: a `cva(...)` / `tv(...)`-style config the component uses, with
+  its `defaultVariants`. A doc comment on a variant axis or value is shown next
+  to it, which is the place for *when to use which*:
+
+  ```ts
+  const badgeVariants = cva("badge", {
+    variants: {
+      tone: {
+        /** Neutral facts: counts, labels. */
+        plain: "…",
+        /** Something went wrong and needs a look. */
+        danger: "…",
+      },
+    },
+  });
+  ```
+
+- **Import paths**: `import` is the package.json `exports` entry other packages
+  use (the declaring file itself or a barrel re-exporting it; the shortest
+  wins). `localImport` is the tsconfig `paths` alias the declaring package uses
+  for its own files.
+- **Stories**: their keys (for `storybun shot`), the doc comment on each story
+  export, and the paths of existing baselines.
 
 ## Configuration
 

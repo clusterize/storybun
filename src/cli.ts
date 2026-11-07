@@ -103,7 +103,7 @@ async function list(args: string[]) {
 }
 
 /** Flags that consume the following argument, so it is not a positional. */
-const VALUE_FLAGS = new Set(["--out", "-o", "--viewport", "--mode", "--filter"]);
+const VALUE_FLAGS = new Set(["--out", "-o", "--viewport", "--mode", "--filter", "--limit"]);
 
 function positionals(args: string[]): string[] {
   const out: string[] = [];
@@ -117,6 +117,18 @@ function positionals(args: string[]): string[] {
     out.push(arg);
   }
   return out;
+}
+
+async function components(args: string[]) {
+  const { runComponents } = await import("./components-cli.ts");
+
+  const limit = flagValue(args, "--limit");
+  const exitCode = await runComponents(cwd, {
+    query: positionals(args).join(" ") || undefined,
+    json: args.includes("--json"),
+    limit: limit ? Number(limit) : undefined,
+  });
+  process.exit(exitCode);
 }
 
 async function shot(args: string[]) {
@@ -148,6 +160,7 @@ Usage:
   storybun snapshot [options]    Capture and compare every story against its baseline
   storybun list [options]        Print every story key
   storybun shot <story> [opts]   Write a PNG of one story, leaving baselines untouched
+  storybun components [query]    List the components stories demonstrate, or search them
 
 snapshot options:
   -u, --update       Accept the current render as the new baseline
@@ -168,6 +181,10 @@ shot options:
   -o, --out <path>       Output file (default: <story-key>[-<mode>].png in the cwd)
       --viewport <WxH>   Viewport size (default: the first configured snapshot viewport)
       --mode <name>      Snapshot mode to capture in (default: the first configured mode)
+
+components options:
+      --json             Emit the full catalogue (or every match) as JSON
+      --limit <n>        Matches printed in full when searching (default: 5)
 `);
 }
 
@@ -186,6 +203,8 @@ async function main() {
     await list(args);
   } else if (command === "shot") {
     await shot(args);
+  } else if (command === "components") {
+    await components(args);
   } else {
     await dev();
   }

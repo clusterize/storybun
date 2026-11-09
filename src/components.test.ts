@@ -4,6 +4,7 @@ import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { collectComponents, parseDocComment, searchComponents, type ComponentDoc } from "./components.ts";
+import { formatComponent, summarize } from "./components-cli.ts";
 import { loadConfig } from "./config.ts";
 import { scanStories } from "./scanner.ts";
 
@@ -86,6 +87,7 @@ import { Badge } from '@acme/kit/ui'
 const Shell = ({ children }: { children?: unknown }) => <div>{children as never}</div>
 
 const HeaderStory = () => <Shell><JobHeader /><Badge /></Shell>
+/** The log after a retry from the confirm dialog. */
 const LogStory = () => <JobLog />
 
 export { HeaderStory as JobDetailHeader, LogStory as JobDetailLog }
@@ -168,31 +170,37 @@ describe("collectComponents", () => {
   test("lists the stories with their doc comments and existing baselines", () => {
     expect(byName("Badge").stories).toEqual([
       {
-        key: "@acme/kit/Ui/Badge--Badge",
-        export: "Badge",
         file: "packages/kit/src/ui/badge.stories.tsx",
-        description: "The default tone.",
-        baselines: ["__snapshots__/@acme--kit--Ui--Badge--Badge-dark.png"],
-      },
-      {
-        key: "@acme/kit/Ui/Badge--BadgeDanger",
-        export: "BadgeDanger",
-        file: "packages/kit/src/ui/badge.stories.tsx",
-        baselines: [],
+        stories: [
+          {
+            key: "@acme/kit/Ui/Badge--Badge",
+            description: "The default tone.",
+            baselines: ["__snapshots__/@acme--kit--Ui--Badge--Badge-dark.png"],
+          },
+          { key: "@acme/kit/Ui/Badge--BadgeDanger" },
+        ],
       },
     ]);
   });
 
   test("falls back to the sibling components a file renders and credits each story to what it renders", () => {
-    expect(byName("JobHeader").stories.map((s) => s.export)).toEqual(["JobDetailHeader"]);
-    expect(byName("JobLog").stories.map((s) => s.export)).toEqual(["JobDetailLog"]);
+    const keys = (name: string) => byName(name).stories.flatMap((g) => g.stories.map((s) => s.key));
+    expect(keys("JobHeader")).toEqual(["@acme/app/Job/Job-detail--JobDetailHeader"]);
+    expect(keys("JobLog")).toEqual(["@acme/app/Job/Job-detail--JobDetailLog"]);
     expect(byName("JobHeader").description).toBe("The job's title row.");
     expect(byName("JobHeader").import).toBeUndefined();
     expect(byName("JobHeader").localImport).toBe("import { JobHeader } from '@/job/job-parts'");
   });
 
   test("an @component tag names a component the file only reaches through a harness", () => {
-    expect(byName("JobBoard").stories.map((s) => s.export)).toEqual(["JobBoard"]);
+    expect(byName("JobBoard").stories.flatMap((g) => g.stories.map((s) => s.key))).toEqual([
+      "@acme/app/Job/Job-board--JobBoard",
+    ]);
+  });
+
+  test("a component without a doc comment says so, and one without variants omits them", () => {
+    expect(byName("JobBoard").description).toBeNull();
+    expect(byName("JobBoard").variants).toBeUndefined();
   });
 
   test("reports files without a component and tags that resolve to nothing", () => {
@@ -211,8 +219,26 @@ describe("searchComponents", () => {
     expect(searchComponents(components, "went wrong").map((c) => c.name)).toEqual(["Badge"]);
   });
 
+  test("a story note alone does not make a component match", () => {
+    expect(searchComponents(components, "dialog")).toEqual([]);
+    expect(searchComponents(components, "log retry").map((c) => c.name)).toEqual(["JobLog"]);
+  });
+
   test("components matching more terms rank above those matching fewer", () => {
     expect(searchComponents(components, "job title").map((c) => c.name)).toEqual(["JobHeader", "JobBoard", "JobLog"]);
+  });
+});
+
+describe("output", () => {
+  test("the index is one short record per component", () => {
+    expect(summarize(byName("Badge"))).toEqual({ name: "Badge", import: "@acme/kit/ui", summary: "A short status label." });
+    expect(summarize(byName("JobBoard"))).toEqual({ name: "JobBoard", import: "@/job/job-board", summary: null });
+  });
+
+  test("the full view marks a missing description and groups stories by file", () => {
+    const text = formatComponent(byName("JobBoard"));
+    expect(text).toContain("(no description)");
+    expect(text).toContain("stories  packages/app/src/job/job-board.stories.tsx\n    @acme/app/Job/Job-board--JobBoard");
   });
 });
 

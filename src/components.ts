@@ -33,13 +33,18 @@ export interface VariantAxis {
 }
 
 export interface ComponentStory {
+  /** Story key, as `storybun shot` and `storybun list` take it. */
   key: string;
-  export: string;
+  description?: string;
+  /** Existing baseline images of this story, relative to the project root; omitted when there are none. */
+  baselines?: string[];
+}
+
+/** A component's stories, grouped by the file declaring them. */
+export interface ComponentStoryFile {
   /** Story file, relative to the project root. */
   file: string;
-  description?: string;
-  /** Existing baseline images of this story, relative to the project root. */
-  baselines: string[];
+  stories: ComponentStory[];
 }
 
 export interface ComponentDoc {
@@ -50,15 +55,17 @@ export interface ComponentDoc {
   line: number;
   /** Name of the package that declares it. */
   package: string;
-  description?: string;
+  /** The declaration's doc comment; null when it has none, so the gap is visible. */
+  description: string | null;
   /** Set when the doc comment has `@deprecated`; the tag text, or "" when it has none. */
   deprecated?: string;
   /** Import from outside the package, through its package.json `exports`. */
   import?: string;
   /** Import from inside the package, through a tsconfig `paths` alias. */
   localImport?: string;
-  variants: VariantAxis[];
-  stories: ComponentStory[];
+  /** cva/tv-style variants the component uses; omitted when it has none. */
+  variants?: VariantAxis[];
+  stories: ComponentStoryFile[];
 }
 
 export interface CatalogueResult {
@@ -528,17 +535,18 @@ export class Catalogue {
     const deprecated = doc?.tags.find((t) => t.name === "deprecated");
     const publicSpec = this.publicSpecifier(decl);
     const localSpec = this.localSpecifier(decl);
+    const variants = this.variantsOf(decl);
     const line = decl.sourceFile.getLineAndCharacterOfPosition(decl.docNode.getStart(decl.sourceFile)).line + 1;
     return {
       name: decl.name,
       file: relative(this.cwd, decl.file),
       line,
       package: this.packageName(decl.file),
-      ...(doc?.description ? { description: doc.description } : {}),
+      description: doc?.description ?? null,
       ...(deprecated ? { deprecated: deprecated.text } : {}),
       ...(publicSpec ? { import: `import { ${decl.name} } from '${publicSpec}'` } : {}),
       ...(localSpec ? { localImport: `import { ${decl.name} } from '${localSpec}'` } : {}),
-      variants: this.variantsOf(decl),
+      ...(variants.length > 0 ? { variants } : {}),
     };
   }
 }
@@ -582,18 +590,17 @@ export async function collectComponents(
       continue;
     }
 
-    const storyDocs: ComponentStory[] = story.exports.map((exportName) => {
+    const storyDocs = story.exports.map((exportName) => {
       const baselines = (modeNames.length > 0 ? modeNames : [undefined])
         .map((mode) => storyOutputPath(outDir, story.path, exportName, viewport, viewports.length === 1, mode))
         .filter((p) => existsSync(resolve(cwd, p)));
       const description = info.exportDocs.get(exportName);
-      return {
+      const doc: ComponentStory = {
         key: `${story.path}--${exportName}`,
-        export: exportName,
-        file: relFile,
         ...(description ? { description } : {}),
-        baselines,
+        ...(baselines.length > 0 ? { baselines } : {}),
       };
+      return { exportName, doc };
     });
 
     for (const { decl, local } of info.components) {
@@ -605,9 +612,14 @@ export async function collectComponents(
       }
       // The stories that render it; all of the file's when none visibly does
       // (a story built by a factory from another module, say).
-      const rendering = storyDocs.filter((s) => info.exportRenders.get(s.export)?.has(local));
-      for (const s of rendering.length > 0 ? rendering : storyDocs) {
-        if (!doc.stories.some((existing) => existing.key === s.key)) doc.stories.push(s);
+      const rendering = storyDocs.filter((s) => info.exportRenders.get(s.exportName)?.has(local));
+      let group = doc.stories.find((g) => g.file === relFile);
+      if (!group) {
+        group = { file: relFile, stories: [] };
+        doc.stories.push(group);
+      }
+      for (const { doc: s } of rendering.length > 0 ? rendering : storyDocs) {
+        if (!group.stories.some((existing) => existing.key === s.key)) group.stories.push(s);
       }
     }
   }
@@ -621,8 +633,10 @@ export async function collectComponents(
 /**
  * Rank components against a free-text query. Every whitespace-separated term
  * is matched case-insensitively against the name, import paths, source path,
- * doc comment, variants and stories; components matching more terms rank
- * first, then by where they matched (the name counts most).
+ * doc comment and variants; components matching more terms rank first, then
+ * by where they matched (the name counts most). Story names and notes only
+ * break ties: a story's note mentioning "dialog" says nothing about whether
+ * the component is one, so it never makes a component match on its own.
  */
 export function searchComponents(components: ComponentDoc[], query: string): ComponentDoc[] {
   const q = query.trim().toLowerCase();
@@ -635,14 +649,17 @@ export function searchComponents(components: ComponentDoc[], query: string): Com
       [`${c.import ?? ""} ${c.localImport ?? ""} ${c.file}`.toLowerCase(), 2],
       [(c.description ?? "").toLowerCase(), 4],
       [
-        c.variants
+        (c.variants ?? [])
           .flatMap((a) => [a.name, a.description ?? "", ...a.values.flatMap((v) => [v.name, v.description ?? ""])])
           .join(" ")
           .toLowerCase(),
         3,
       ],
-      [c.stories.flatMap((s) => [s.export, s.description ?? ""]).join(" ").toLowerCase(), 1],
     ];
+    const stories = c.stories
+      .flatMap((g) => g.stories.flatMap((s) => [s.key, s.description ?? ""]))
+      .join(" ")
+      .toLowerCase();
     let score = 0;
     let matched = 0;
     for (const term of terms) {
@@ -654,6 +671,7 @@ export function searchComponents(components: ComponentDoc[], query: string): Com
         }
       }
       if (hit) matched++;
+      if (stories.includes(term)) score += 1;
     }
     const name = c.name.toLowerCase();
     if (name === q) score += 1000;

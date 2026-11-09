@@ -1,6 +1,7 @@
 import { relative } from "path";
 import { loadConfig } from "./config.ts";
 import { scanStories } from "./scanner.ts";
+import { print } from "./print.ts";
 import { storyKeys } from "./story-keys.ts";
 
 export interface ListOptions {
@@ -27,7 +28,7 @@ export async function runList(
   }
 
   if (options.json) {
-    console.log(
+    await print(
       JSON.stringify(
         keys.map((s) => ({
           key: s.key,
@@ -41,9 +42,7 @@ export async function runList(
       ),
     );
   } else {
-    for (const s of keys) {
-      console.log(s.key);
-    }
+    await print(keys.map((s) => s.key).join("\n"));
   }
 
   return keys.length > 0 ? 0 : 1;

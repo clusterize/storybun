@@ -325,7 +325,7 @@ export class Catalogue {
         const rel = relative(abs, decl.file);
         if (rel.startsWith("..") || !decl.file.endsWith(tSuffix)) continue;
         const matched = tSuffix ? rel.slice(0, rel.length - tSuffix.length) : rel;
-        candidates.push(pkg.name + subpath.replace("*", matched.split(sep).join("/")));
+        candidates.push(pkg.name + subpath.replaceAll("*", matched.split(sep).join("/")));
         continue;
       }
       const abs = resolve(pkg.dir, target);
@@ -824,6 +824,6 @@ function exportEntries(exports: unknown): [string, string][] {
   }
   return Object.entries(map).flatMap(([key, value]) => {
     const t = target(value);
-    return t && /\.(tsx|ts|jsx|js|mts|mjs)$/.test(t.replace("*", "x.ts")) ? [[key, t] as [string, string]] : [];
+    return t && /\.(tsx|ts|jsx|js|mts|mjs)$/.test(t.replaceAll("*", "x.ts")) ? [[key, t] as [string, string]] : [];
   });
 }

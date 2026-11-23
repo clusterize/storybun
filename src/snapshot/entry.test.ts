@@ -13,6 +13,8 @@ function testConfig(): ResolvedConfig {
       outDir: "__snapshots__",
       threshold: 0.1,
       maxDiffPixels: 0,
+      minColors: 2,
+      minColorsIgnore: [],
       viewports: [{ width: 800, height: 600 }],
       settleTimeout: 2_000,
       markerTimeout: 500,

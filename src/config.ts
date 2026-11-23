@@ -5,6 +5,8 @@ const snapshotDefaults: ResolvedSnapshotConfig = {
   outDir: "__snapshots__",
   threshold: 0.1,
   maxDiffPixels: 0,
+  minColors: 2,
+  minColorsIgnore: [],
   viewports: [{ width: 1280, height: 720 }],
   settleTimeout: 10_000,
   markerTimeout: 500,

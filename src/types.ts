@@ -36,6 +36,19 @@ export interface SnapshotConfig {
    * which touches far more pixels than that.
    */
   maxDiffPixels?: number;
+  /**
+   * Fewest distinct colours a capture may hold and still count as a render
+   * (default: 2). A story whose subtree never becomes visible paints the page
+   * background and nothing else, so its capture holds exactly one colour; the
+   * floor fails that capture instead of comparing it or writing it as a
+   * baseline, on `--update` too. Set to 0 to disable.
+   */
+  minColors?: number;
+  /**
+   * Story keys exempt from the `minColors` floor, matched as substrings the way
+   * `--filter` is. For the rare story whose render really is one flat colour.
+   */
+  minColorsIgnore?: string[];
   viewports?: { width: number; height: number; name?: string }[];
   /**
    * @deprecated Ignored. Captures used to sleep this long after the story
@@ -112,6 +125,8 @@ export interface ResolvedSnapshotConfig {
   outDir: string;
   threshold: number;
   maxDiffPixels: number;
+  minColors: number;
+  minColorsIgnore: string[];
   viewports: { width: number; height: number; name?: string }[];
   settleTimeout: number;
   markerTimeout: number;

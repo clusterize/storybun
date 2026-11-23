@@ -262,6 +262,13 @@ export default {
     // touches far more pixels than a small budget lets through.
     maxDiffPixels: 0,
 
+    // Fewest distinct colours a capture may hold and still count as a render
+    // (default: 2). 0 disables the check. See "The blank-capture floor" below.
+    minColors: 2,
+
+    // Stories exempt from the floor, matched as substrings like `--filter`
+    minColorsIgnore: [],
+
     // Viewport sizes to render each story at before capture (default: one
     // 1280x720 viewport). The captured image is cropped to the story's own
     // content, not this size — a narrow or short story still produces a
@@ -311,6 +318,31 @@ Timers keep running under `clock` — only the reported time is frozen — so a
 component polling on an interval simply re-renders the same output. Story
 fixtures should therefore express timestamps at or before the frozen instant, so
 that relative labels read as the past.
+
+#### The blank-capture floor
+
+A capture is only ever judged against the previous baseline, so the comparison
+has no opinion on whether a render contains anything. Accept one blank capture
+as a baseline and it agrees with itself on every later run: the story reports
+green while covering nothing, which is worse than having no baseline at all,
+because it makes a broken render the expected result.
+
+`minColors` is the floor that stops that. A capture holding fewer than
+`minColors` distinct colours fails as a story that could not be captured: it is
+**neither compared nor written**, on `--update` too, its existing baseline is
+kept, and the run exits non-zero while every other story updates or compares as
+usual.
+
+The default of 2 fails only a capture that is one flat colour end to end, which
+is what a story paints when its subtree never becomes visible -- content left in
+a closed portal, an enter animation stuck at `opacity: 0`, a fixture the
+component rejects with an empty frame. That is deliberately the most
+conservative floor that catches the fault, because "how much ink is on the page"
+does not otherwise separate an empty render from a sparse one: an empty bordered
+card with a drop shadow covers more of the viewport, and compresses to more
+bytes, than a 40px spinner does. Raise the floor for a stricter check, but expect
+to exempt genuinely minimal stories -- separators, skeletons, unchecked
+controls -- through `minColorsIgnore`.
 
 ### Readiness
 

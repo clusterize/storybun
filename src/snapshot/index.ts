@@ -5,6 +5,7 @@ import { scanStories } from "../scanner.ts";
 import { buildSnapshotEntry } from "./entry.ts";
 import { startSnapshotServer } from "./server.ts";
 import { captureAll } from "./capture.ts";
+import { assertRendered } from "./floor.ts";
 import { compareCapture, describeCompareOutcome, pruneBaselines, updateBaseline, type CompareResult } from "./compare.ts";
 import { printReport, printUpdateReport, printFailures, printPruned, getExitCode } from "./report.ts";
 import { updateCodeowners } from "./codeowners.ts";
@@ -90,6 +91,9 @@ export async function runSnapshots(
         () =>
           captureAll(browser, stories, resolvedSnapshotConfig, serverUrl, options.filter, {
             onCapture: async (capture) => {
+              // Before either path: a blank capture fails here, so it is
+              // neither compared nor written as a baseline.
+              assertRendered(capture, snapshotConfig);
               if (options.update) {
                 await updateBaseline(capture);
                 return;

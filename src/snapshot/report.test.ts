@@ -39,6 +39,8 @@ function config(): ResolvedSnapshotConfig {
     outDir,
     threshold: 0.1,
     maxDiffPixels: 0,
+    minColors: 2,
+    minColorsIgnore: [],
     viewports: [viewport],
     settleTimeout: 2_000,
     markerTimeout: 500,

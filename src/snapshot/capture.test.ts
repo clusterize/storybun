@@ -107,7 +107,16 @@ const emptyStory: StoryEntry = {
 const portalStory: StoryEntry = {
   path: "fixtures/portal",
   filePath: join(fixturesDir, "portal.stories.tsx"),
-  exports: ["OpenMenu", "PortalOnly", "EmptyPortal", "FixedBanner", "FixedContainer", "NestedPortal"],
+  exports: [
+    "OpenMenu",
+    "PortalOnly",
+    "EmptyPortal",
+    "FixedBanner",
+    "FixedContainer",
+    "NestedPortal",
+    "OffPageHelpers",
+    "OverTheTopEdge",
+  ],
   packageName: "test-pkg",
 };
 
@@ -297,6 +306,50 @@ describe("captureStoryOrPage (real chromium)", () => {
       await page.close();
     }
   }, 10_000);
+
+  // How often the page saw its viewport change while `capture` ran.
+  async function resizesDuring(
+    storyKey: string,
+    viewport: { width: number; height: number },
+  ): Promise<{ resizes: number; height: number }> {
+    const page: Page = await browser.newPage();
+    try {
+      await page.setViewportSize(viewport);
+      await page.goto(`${serverUrl}/snapshot?story=${encodeURIComponent(storyKey)}`, {
+        waitUntil: "networkidle",
+      });
+      await page.waitForFunction(() => window.__STORYBUN_READY__ === true, { timeout: 30_000 });
+      await page.evaluate(() => {
+        window.__resizes = 0;
+        window.addEventListener("resize", () => window.__resizes++);
+      });
+      const buffer = await captureStoryOrPage(page, storyKey);
+      // A resize event is dispatched with the next frame; give it two.
+      await page.evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      );
+      return { resizes: await page.evaluate(() => window.__resizes), height: pngDimensions(buffer).height };
+    } finally {
+      await page.close();
+    }
+  }
+
+  test("leaves the viewport alone while capturing a story that fits in it", async () => {
+    // A story that answers to its viewport from script -- a popup placed by a
+    // positioning library, a chart that measures its container -- must not
+    // be made to answer by the capture itself.
+    const { resizes } = await resizesDuring("fixtures/narrow--Badge", { width: 800, height: 600 });
+    expect(resizes).toBe(0);
+  }, 15_000);
+
+  test("goes beyond the viewport only for a story that leaves it, and captures that one in full", async () => {
+    const { resizes, height } = await resizesDuring("fixtures/tall--Stack", { width: 800, height: 400 });
+    expect(height).toBe(2000);
+    // The price of the full height, and the reason the test above matters:
+    // if this ever reads 0 the browser has stopped charging it, and the
+    // viewport check in `captureClippedRegion` can go.
+    expect(resizes).toBeGreaterThan(0);
+  }, 15_000);
 
   test("is byte-identical to a plain clipped screenshot for an ordinary in-flow story (no re-baseline)", async () => {
     const viewport = { width: 800, height: 600 };
@@ -552,6 +605,32 @@ describe("captureAll (real call site)", () => {
     expect(width).toBe(100);
     expect(height).toBe(50);
     expect(pixelAt(buffer, 50, 25)).toEqual([255, 0, 255, 255]);
+  }, 20_000);
+
+  test("ignores what a library parks off the page, above it or to its left", async () => {
+    const config = snapshotConfig({ viewports: [{ width: 800, height: 600 }], concurrency: 1 });
+
+    const { captures } = await captureAllWithBuffers(browser, [portalStory], config, serverUrl, "OffPageHelpers");
+
+    expect(captures).toHaveLength(1);
+    const buffer = captures[0]!.buffer;
+    // The story's own 60x30 box, not 20,000px of blank page above it.
+    expect(pngDimensions(buffer)).toEqual({ width: 60, height: 30 });
+    expect(everyPixelIs(buffer, [0, 0, 255, 255])).toBe(true);
+  }, 20_000);
+
+  test("counts an element that hangs over the top edge of the page with the part on the page", async () => {
+    const config = snapshotConfig({ viewports: [{ width: 800, height: 600 }], concurrency: 1 });
+
+    const { captures } = await captureAllWithBuffers(browser, [portalStory], config, serverUrl, "OverTheTopEdge");
+
+    expect(captures).toHaveLength(1);
+    const buffer = captures[0]!.buffer;
+    // The banner's lower 30 of 50 rows are on the page, from the page's left
+    // edge to x=100; the story's own box ends at (68,38).
+    expect(pngDimensions(buffer)).toEqual({ width: 100, height: 38 });
+    expect(pixelAt(buffer, 90, 5)).toEqual([255, 0, 255, 255]);
+    expect(pixelAt(buffer, 30, 35)).toEqual([0, 0, 255, 255]);
   }, 20_000);
 
   test("ignores a portaled element with no box", async () => {

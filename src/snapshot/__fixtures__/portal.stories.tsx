@@ -113,3 +113,43 @@ export const EmptyPortal = () => (
     {createPortal(<div />, document.body)}
   </>
 );
+
+// Helpers a library parks off the page: a span 20,000px above it to measure
+// text in, a visually hidden label far to its left. Nobody can scroll there,
+// so neither may stretch the capture out to itself.
+export const OffPageHelpers = () => (
+  <>
+    <div style={{ width: 60, height: 30, background: "rgb(0, 0, 255)" }} />
+    {createPortal(
+      <span aria-hidden="true" style={{ position: "absolute", top: -20000, left: 0, whiteSpace: "pre" }}>
+        measured text
+      </span>,
+      document.body,
+    )}
+    {createPortal(
+      <span style={{ position: "absolute", top: 0, left: -9999, width: 200, height: 20 }}>hidden label</span>,
+      document.body,
+    )}
+  </>
+);
+
+// A banner that hangs over the top edge of the page: the part on the page is
+// seen, the part above it is not.
+export const OverTheTopEdge = () => (
+  <>
+    <div style={{ width: 60, height: 30, background: "rgb(0, 0, 255)" }} />
+    {createPortal(
+      <div
+        style={{
+          position: "fixed",
+          left: 0,
+          top: -20,
+          width: 100,
+          height: 50,
+          background: "rgb(255, 0, 255)",
+        }}
+      />,
+      document.body,
+    )}
+  </>
+);

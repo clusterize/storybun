@@ -450,7 +450,7 @@ export async function fingerprintStories(input: FingerprintInput): Promise<Map<s
     Bun.version,
     input.browserVersion,
     await stylesheetHash(graph, input.outputDir),
-    JSON.stringify([config.clock, config.timezoneId, config.locale, config.environment]),
+    JSON.stringify([config.clock, config.timezoneId, config.locale, config.environment, config.switchModesInPage]),
   );
 
   // A page's fingerprint includes every enum one of its modules names: the

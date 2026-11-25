@@ -25,6 +25,7 @@ function testConfig(): ResolvedConfig {
       locale: "en-US",
       modes: {},
       environment: "",
+      switchModesInPage: false,
       report: { component: null },
     },
   };

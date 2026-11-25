@@ -17,6 +17,7 @@ const snapshotDefaults: ResolvedSnapshotConfig = {
   locale: "en-US",
   modes: {},
   environment: "",
+  switchModesInPage: false,
   report: { component: null },
 };
 

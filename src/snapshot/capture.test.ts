@@ -54,6 +54,7 @@ function testConfig(): ResolvedConfig {
       locale: "en-US",
       modes: {},
       environment: "",
+      switchModesInPage: false,
       report: { component: null },
     },
   };
@@ -114,6 +115,13 @@ const schemeStory: StoryEntry = {
   path: "fixtures/scheme",
   filePath: join(fixturesDir, "scheme.stories.tsx"),
   exports: ["Swatch"],
+  packageName: "test-pkg",
+};
+
+const liveSchemeStory: StoryEntry = {
+  path: "fixtures/scheme-live",
+  filePath: join(fixturesDir, "scheme.stories.tsx"),
+  exports: ["LiveAndAtMount"],
   packageName: "test-pkg",
 };
 
@@ -380,7 +388,7 @@ describe("captureAll (real call site)", () => {
 
   beforeAll(async () => {
     const build = await buildSnapshotEntry(
-      [...stories, schemeStory, emptyStory, portalStory, overhangStory],
+      [...stories, schemeStory, liveSchemeStory, emptyStory, portalStory, overhangStory],
       testPackages(),
       testConfig(),
       cwd,
@@ -635,6 +643,87 @@ describe("captureAll (real call site)", () => {
     expect(byMode.get("dark")!.outputPath).toBe("/out/fixtures--scheme--Swatch-dark.png");
     expect(pixelAt(byMode.get("dark")!.buffer, 50, 30)).toEqual([0, 255, 0, 255]);
   }, 20_000);
+
+  test("switchModesInPage captures a story's colour schemes from one page load", async () => {
+    const modes = { light: { colorScheme: "light" as const }, dark: { colorScheme: "dark" as const } };
+    const halves = async (switchModesInPage: boolean) => {
+      const config = snapshotConfig({ outDir: "/out", concurrency: 1, modes, switchModesInPage });
+      const { captures } = await captureAllWithBuffers(browser, [liveSchemeStory], config, serverUrl);
+      return Object.fromEntries(
+        captures.map((c) => [c.mode, { live: pixelAt(c.buffer, 25, 30), atMount: pixelAt(c.buffer, 75, 30) }]),
+      );
+    };
+    const red = [255, 0, 0, 255];
+    const green = [0, 255, 0, 255];
+
+    // A page per mode: the dark page was dark from the start.
+    expect(await halves(false)).toEqual({
+      light: { live: red, atMount: red },
+      dark: { live: green, atMount: green },
+    });
+    // One page: what follows the scheme turns dark, what was read once when
+    // the story mounted, on the light page, stays as it was.
+    expect(await halves(true)).toEqual({
+      light: { live: red, atMount: red },
+      dark: { live: green, atMount: red },
+    });
+  }, 30_000);
+
+  test("switchModesInPage captures a story's modes together, also when only one of them is due", async () => {
+    const config = snapshotConfig({
+      outDir: "/out",
+      concurrency: 1,
+      switchModesInPage: true,
+      modes: { light: { colorScheme: "light" }, dark: { colorScheme: "dark" } },
+    });
+    const buffers = new Map<string | undefined, Buffer>();
+
+    const { captures, skipped } = await captureAll(
+      browser,
+      [liveSchemeStory],
+      config,
+      serverUrl,
+      undefined,
+      { onCapture: (c) => void buffers.set(c.mode, c.buffer) },
+      { select: (capture) => capture.modeName === "dark" },
+    );
+
+    // Dark alone, on a page of its own, would read the scheme at mount as
+    // dark; the image a run of both modes gives has it red.
+    expect(captures.map((c) => c.mode)).toEqual(["light", "dark"]);
+    expect(skipped).toEqual([]);
+    expect(pixelAt(buffers.get("dark")!, 75, 30)).toEqual([255, 0, 0, 255]);
+  }, 30_000);
+
+  test("switchModesInPage keeps modes that differ in locale on pages of their own", async () => {
+    const config = snapshotConfig({
+      outDir: "/out",
+      concurrency: 1,
+      switchModesInPage: true,
+      modes: { light: { colorScheme: "light" }, german: { colorScheme: "dark", locale: "de-DE" } },
+    });
+
+    const { captures } = await captureAllWithBuffers(browser, [liveSchemeStory], config, serverUrl);
+
+    // Dark from the start, so the read at mount is dark too.
+    const german = captures.find((c) => c.mode === "german")!;
+    expect(pixelAt(german.buffer, 75, 30)).toEqual([0, 255, 0, 255]);
+  }, 30_000);
+
+  test("switchModesInPage reports a story that never rendered once per mode", async () => {
+    const config = snapshotConfig({
+      outDir: "/out",
+      concurrency: 1,
+      switchModesInPage: true,
+      modes: { light: { colorScheme: "light" }, dark: { colorScheme: "dark" } },
+    });
+
+    const { captures, failures } = await captureAll(browser, [emptyStory], config, serverUrl);
+
+    expect(captures).toEqual([]);
+    expect(failures.map((f) => f.mode)).toEqual(["light", "dark"]);
+    expect(failures[1]!.error.message).toBe(failures[0]!.error.message);
+  }, 30_000);
 
   test("puts the viewport suffix before the mode suffix when both axes are configured", async () => {
     const config = snapshotConfig({

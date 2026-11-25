@@ -51,6 +51,7 @@ function config(): ResolvedSnapshotConfig {
     locale: "en-US",
     modes: { light: { colorScheme: "light" }, dark: { colorScheme: "dark" } },
     environment: "",
+    switchModesInPage: false,
     report: { component: null },
   };
 }

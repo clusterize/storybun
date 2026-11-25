@@ -106,6 +106,7 @@ async function fingerprints(options: Options = {}): Promise<Record<string, strin
       locale: "en-US",
       modes: {},
       environment: options.environment ?? "",
+      switchModesInPage: false,
       report: { component: null },
     },
   };

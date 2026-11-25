@@ -344,6 +344,10 @@ bytes, than a 40px spinner does. Raise the floor for a stricter check, but expec
 to exempt genuinely minimal stories -- separators, skeletons, unchecked
 controls -- through `minColorsIgnore`.
 
+`storybun shot` applies the same floor: it still writes the picture, but says
+the story rendered nothing and exits non-zero, so a blank image is not taken
+for a render.
+
 ### Readiness
 
 A capture is taken when the story is *settled*, not after a fixed delay. After

@@ -1,6 +1,5 @@
 import { PNG } from "pngjs";
 import type { ResolvedSnapshotConfig } from "../types.ts";
-import type { CaptureResult } from "./capture.ts";
 
 /**
  * Distinct RGB values in a PNG, counted exactly and unquantised.
@@ -50,7 +49,10 @@ export class BlankCaptureError extends Error {
  * capture -- before it is compared or written, on `--update` too -- and the run
  * goes on with the others.
  */
-export function assertRendered(capture: CaptureResult, config: ResolvedSnapshotConfig): void {
+export function assertRendered(
+  capture: { storyKey: string; buffer: Buffer },
+  config: Pick<ResolvedSnapshotConfig, "minColors" | "minColorsIgnore">,
+): void {
   if (config.minColors <= 0) return;
   if (config.minColorsIgnore.some((pattern) => capture.storyKey.includes(pattern))) return;
   const colors = countColors(capture.buffer, config.minColors);

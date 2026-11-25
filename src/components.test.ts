@@ -4,7 +4,7 @@ import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { collectComponents, parseDocComment, searchComponents, type ComponentDoc } from "./components.ts";
-import { formatComponent, formatIndexLine, summarize } from "./components-cli.ts";
+import { firstSentence, formatComponent, formatIndexLine, summarize } from "./components-cli.ts";
 import { loadConfig } from "./config.ts";
 import { scanStories } from "./scanner.ts";
 
@@ -258,6 +258,15 @@ describe("output", () => {
     expect(
       formatIndexLine({ ...summarize(byName("Badge")), deprecated: "Use StatusDot. It scales better." }),
     ).toBe("Badge  @acme/kit/ui  — Deprecated. Use StatusDot.");
+  });
+
+  test("a summary is not cut at an abbreviation", () => {
+    expect(firstSentence("A modal for a focused task, e.g. a form. Use Sheet for panels.")).toBe(
+      "A modal for a focused task, e.g. a form.",
+    );
+    expect(firstSentence("Inline, i.e. inside text; vs. a block. More.")).toBe("Inline, i.e. inside text; vs. a block.");
+    expect(firstSentence("One line\nover two. Then more!")).toBe("One line over two.");
+    expect(firstSentence("No full stop")).toBe("No full stop");
   });
 
   test("the full view marks a missing description and groups stories by file", () => {

@@ -161,8 +161,15 @@ function indent(text: string, n: number): string {
     .join("\n");
 }
 
-function firstSentence(text: string): string {
+/** Abbreviations whose period does not end a sentence ("such as, e.g. a form"). */
+const ABBREVIATION = /(?:^|[\s(])(?:e\.g|i\.e|vs|cf|approx)$/i;
+
+/** The first sentence of a doc comment, which the index and story lists show alone. */
+export function firstSentence(text: string): string {
   const flat = text.replace(/\s*\n\s*/g, " ").trim();
-  const end = flat.search(/[.!?](\s|$)/);
-  return end === -1 ? flat : flat.slice(0, end + 1);
+  for (const match of flat.matchAll(/[.!?](?=\s|$)/g)) {
+    if (match[0] === "." && ABBREVIATION.test(flat.slice(0, match.index))) continue;
+    return flat.slice(0, match.index + 1);
+  }
+  return flat;
 }

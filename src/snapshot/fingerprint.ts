@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "path";
 import type { BunPlugin } from "bun";
@@ -68,17 +69,25 @@ export function recordLoads(plugins: BunPlugin[], loaded: LoadedContents): BunPl
         }
         return result;
       };
-      const proxy = new Proxy(build, {
+      const proxy: typeof build = new Proxy(build, {
         get(target, prop) {
           if (prop === "onLoad") {
-            return (constraints: unknown, callback: (args: any) => unknown) =>
+            return (constraints: unknown, callback: (args: any) => unknown) => {
               (target as any).onLoad(constraints, (args: any) => {
                 const result = callback(args);
                 return result instanceof Promise ? result.then((r) => record(args, r)) : record(args, result);
               });
+              return proxy;
+            };
           }
           const value = Reflect.get(target, prop);
-          return typeof value === "function" ? value.bind(target) : value;
+          if (typeof value !== "function") return value;
+          // Registration methods return the builder for chaining; hand back
+          // the proxy, or a chained `.onLoad` would go unrecorded.
+          return (...args: unknown[]) => {
+            const result = value.apply(target, args);
+            return result === target ? proxy : result;
+          };
         },
       });
       return plugin.setup(proxy);
@@ -90,32 +99,51 @@ export function recordLoads(plugins: BunPlugin[], loaded: LoadedContents): BunPl
 // Which modules a story's page loads
 // ---------------------------------------------------------------------------
 
+/** The generated module every snapshot page starts from; see `entry.ts`. */
+const ENTRY_MODULE = "_storybun_snapshot_entry.tsx";
+
+/** A path as the bundler reports it: symlinks resolved. */
+function realPath(path: string): string {
+  try {
+    return realpathSync(resolve(path));
+  } catch {
+    return resolve(path);
+  }
+}
+
 /**
  * For each story file, the inputs that end up in the chunks its page loads:
- * the story's own chunk and every chunk reachable from it. The one kind of
- * import not followed is a dynamic import of a story chunk, which is how the
- * generated entry reaches every story; a page loads one of them. A lazy
- * import in application code is followed, since rendering may load it.
- * `bytesInOutput > 0` leaves out modules the bundler dropped, such as a
- * barrel that only re-exports: adding an export to it changes no page.
+ * the entry chunk, which the page's HTML names, the story's own chunk, and
+ * every chunk reachable from either. The one import not followed is the
+ * entry's dynamic import of a story chunk, which is how the generated entry
+ * reaches every story; a page loads one of them. A lazy import anywhere else
+ * is followed, since rendering may load it. `bytesInOutput > 0` leaves out
+ * modules the bundler dropped, such as a barrel that only re-exports: adding
+ * an export to it changes no page.
  */
 export function storyPageInputs(graph: BuildGraph, storyFiles: string[]): Map<string, Set<string>> {
   const chunkOf = new Map<string, string>();
+  let entryChunk: string | undefined;
   for (const [key, output] of Object.entries(graph.outputs)) {
-    if (output.entryPoint && key.endsWith(".js")) chunkOf.set(resolve(output.entryPoint), key);
+    if (!output.entryPoint || !key.endsWith(".js")) continue;
+    if (output.entryPoint.endsWith(ENTRY_MODULE)) entryChunk = key;
+    else chunkOf.set(realPath(output.entryPoint), key);
   }
   const storyChunks = new Set<string>();
   for (const file of storyFiles) {
-    const chunk = chunkOf.get(resolve(file));
+    const chunk = chunkOf.get(realPath(file));
     if (chunk) storyChunks.add(chunk);
   }
 
   const pages = new Map<string, Set<string>>();
   for (const file of storyFiles) {
     const inputs = new Set<string>();
-    const start = chunkOf.get(resolve(file));
+    const start = chunkOf.get(realPath(file));
     const seen = new Set<string>();
-    const stack = start ? [start] : [];
+    // The entry chunk is seeded and not only reached: a story chunk usually
+    // imports it, but not when the bundler moved the shared modules out of
+    // it (a top-level await in the Wrapper's graph does that).
+    const stack = start ? [start, ...(entryChunk ? [entryChunk] : [])] : [];
     while (stack.length > 0) {
       const chunk = stack.pop()!;
       if (seen.has(chunk)) continue;
@@ -127,7 +155,7 @@ export function storyPageInputs(graph: BuildGraph, storyFiles: string[]): Map<st
       for (const imported of output.imports ?? []) {
         const target = imported.path in graph.outputs ? imported.path : `./${imported.path.replace(/^\.\//, "")}`;
         if (!(target in graph.outputs)) continue;
-        if (imported.kind === "dynamic-import" && storyChunks.has(target)) continue;
+        if (chunk === entryChunk && imported.kind === "dynamic-import" && storyChunks.has(target)) continue;
         stack.push(target);
       }
     }
@@ -305,15 +333,34 @@ export class ModuleHashes {
 const CSS_REFERENCE = /@(?:import|plugin|config|reference)\s+(?:url\(\s*)?["']([^"']+)["']|url\(\s*["']?([^"')]+)["']?\s*\)/g;
 const CSS_BANNER = /\/\*![\s\S]*?\*\//g;
 
-function tryResolve(specifier: string, fromDir: string): string | null {
-  if (/^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(specifier)) return null;
-  for (const candidate of [specifier, `./${specifier}`]) {
+/**
+ * The files a stylesheet reference stands for. A relative path is that file.
+ * A package is its resolved entry and its `package.json`: a stylesheet-only
+ * package exposes its sheet under a `style` condition the module resolver
+ * does not follow, and the manifest, which carries the version, changes
+ * whenever the package does.
+ */
+function resolveReference(specifier: string, fromDir: string): string[] {
+  if (/^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(specifier)) return [];
+  const found: string[] = [];
+  const attempt = (candidate: string) => {
     try {
-      return Bun.resolveSync(candidate, fromDir);
-    } catch {}
+      found.push(Bun.resolveSync(candidate, fromDir));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (specifier.startsWith(".") || isAbsolute(specifier)) {
+    if (!attempt(specifier)) found.push(isAbsolute(specifier) ? specifier : join(fromDir, specifier));
+    return found;
   }
-  const direct = isAbsolute(specifier) ? specifier : join(fromDir, specifier);
-  return direct;
+  const packageName = specifier.split("/").slice(0, specifier.startsWith("@") ? 2 : 1).join("/");
+  const asPackage = attempt(`${packageName}/package.json`);
+  attempt(specifier);
+  // `@import "partial.css"` may also mean the file next to this one.
+  if (!asPackage && !attempt(`./${specifier}`)) found.push(join(fromDir, specifier));
+  return found;
 }
 
 /**
@@ -353,8 +400,7 @@ export async function stylesheetHash(graph: BuildGraph, outputDir: string): Prom
     parts.push(`${relative(process.cwd(), path)}:${sha(bytes)}`);
     if (extname(path) !== ".css") continue;
     for (const match of new TextDecoder().decode(bytes).matchAll(CSS_REFERENCE)) {
-      const target = tryResolve((match[1] ?? match[2])!, dirname(path));
-      if (target) queue.push(target);
+      queue.push(...resolveReference((match[1] ?? match[2])!, dirname(path)));
     }
   }
 
@@ -431,7 +477,7 @@ export async function fingerprintStories(input: FingerprintInput): Promise<Map<s
       if (enumNames) for (const name of await modules.mentions(module, enumNames)) named.add(name);
       // The generated entry lists every story, so it changes whenever one is
       // added; what it does is this tool's own code, covered by `toolHash`.
-      if (module.endsWith("_storybun_snapshot_entry.tsx")) continue;
+      if (module.endsWith(ENTRY_MODULE)) continue;
       // Ids must not depend on where the project is checked out.
       parts.push(`${module.replaceAll(`${cwd}/`, "")}=${await modules.hash(module)}`);
     }

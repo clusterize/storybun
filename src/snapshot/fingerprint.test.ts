@@ -215,6 +215,41 @@ describe("fingerprintStories", () => {
     expect(changed(before, await fingerprints({ plugins: [plugin] }))).toEqual(["badge.stories.tsx"]);
   });
 
+  test("a plugin that chains its registrations is recorded all the same", async () => {
+    let greeting = "hello";
+    const plugin: BunPlugin = {
+      name: "chained",
+      setup(build) {
+        build
+          .onResolve({ filter: /^chained:/ }, (args) => ({ path: args.path.slice(8), namespace: "chained" }))
+          .onLoad({ filter: /.*/, namespace: "chained" }, () => ({
+            contents: `export default ${JSON.stringify(greeting)};`,
+            loader: "js",
+          }));
+      },
+    };
+    await write("badge.stories.tsx", `import text from "chained:greeting";\nexport const Plain = () => <span>{text}</span>;\n`);
+
+    const before = await fingerprints({ plugins: [plugin] });
+    // Unrecorded content would get a fingerprint no two runs share.
+    expect(await fingerprints({ plugins: [plugin] })).toEqual(before);
+    greeting = "goodbye";
+    expect(changed(before, await fingerprints({ plugins: [plugin] }))).toEqual(["badge.stories.tsx"]);
+  });
+
+  test("a stylesheet package the sheet imports moves every story when it changes version", async () => {
+    // A stylesheet-only package: no entry a module resolver would find.
+    const manifest = (version: string) =>
+      JSON.stringify({ name: "sheet-only", version, style: "sheet.css", exports: { ".": { style: "./sheet.css" } } });
+    await write("node_modules/sheet-only/package.json", manifest("1.0.0"));
+    await write("node_modules/sheet-only/sheet.css", `.from-package { color: green; }\n`);
+    await write("partial.css", `@import "sheet-only";\n.partial { color: red; }\n`);
+
+    const before = await fingerprints();
+    await write("node_modules/sheet-only/package.json", manifest("1.0.1"));
+    expect(changed(before, await fingerprints())).toEqual(["badge.stories.tsx", "button.stories.tsx"]);
+  });
+
   test("the environment and the browser version move every story", async () => {
     const before = await fingerprints();
     const all = ["badge.stories.tsx", "button.stories.tsx"];
@@ -224,16 +259,18 @@ describe("fingerprintStories", () => {
 });
 
 describe("storyPageInputs", () => {
+  const ENTRY = "_storybun_snapshot_entry.tsx";
   const graph: BuildGraph = {
     inputs: {},
     outputs: {
       "./entry.js": {
         bytes: 1,
-        entryPoint: "entry.tsx",
-        inputs: { "entry.tsx": { bytesInOutput: 9 }, "wrapper.tsx": { bytesInOutput: 5 } },
+        entryPoint: ENTRY,
+        inputs: { [ENTRY]: { bytesInOutput: 9 }, "wrapper.tsx": { bytesInOutput: 5 } },
         imports: [
           { path: "./a.js", kind: "dynamic-import" },
           { path: "./b.js", kind: "dynamic-import" },
+          { path: "./c.js", kind: "dynamic-import" },
         ],
       },
       "./a.js": {
@@ -254,23 +291,39 @@ describe("storyPageInputs", () => {
           { path: "./a.js", kind: "import-statement" },
         ],
       },
+      // Imports nothing from the entry chunk, and loads another story lazily.
+      "./c.js": {
+        bytes: 1,
+        entryPoint: "c.stories.tsx",
+        inputs: { "c.stories.tsx": { bytesInOutput: 3 } },
+        imports: [{ path: "./b.js", kind: "dynamic-import" }],
+      },
       "./lazy.js": { bytes: 1, entryPoint: "lazy.tsx", inputs: { "lazy.tsx": { bytesInOutput: 2 } } },
     },
   };
+  const page = (story: string) =>
+    [...storyPageInputs(graph, ["a.stories.tsx", "b.stories.tsx", "c.stories.tsx"]).get(story)!].sort();
 
   test("a page is its story's chunk plus what that reaches, never the other stories the entry lists", () => {
-    const pages = storyPageInputs(graph, ["a.stories.tsx", "b.stories.tsx"]);
     // The lazily imported chunk counts: rendering may load it. The barrel
     // with nothing in the output does not.
-    expect([...pages.get("a.stories.tsx")!].sort()).toEqual(["a.stories.tsx", "entry.tsx", "lazy.tsx", "wrapper.tsx"]);
+    expect(page("a.stories.tsx")).toEqual([ENTRY, "a.stories.tsx", "lazy.tsx", "wrapper.tsx"]);
   });
 
   test("a story that imports from another story file loads that story's chunk too", () => {
-    const pages = storyPageInputs(graph, ["a.stories.tsx", "b.stories.tsx"]);
-    expect([...pages.get("b.stories.tsx")!].sort()).toEqual([
+    expect(page("b.stories.tsx")).toEqual([ENTRY, "a.stories.tsx", "b.stories.tsx", "lazy.tsx", "wrapper.tsx"]);
+  });
+
+  test("the entry chunk is part of every page, also when the story's chunk does not import it", () => {
+    expect(page("c.stories.tsx")).toContain("wrapper.tsx");
+  });
+
+  test("a story's own lazy import of another story is followed; only the entry's are not", () => {
+    expect(page("c.stories.tsx")).toEqual([
+      ENTRY,
       "a.stories.tsx",
       "b.stories.tsx",
-      "entry.tsx",
+      "c.stories.tsx",
       "lazy.tsx",
       "wrapper.tsx",
     ]);

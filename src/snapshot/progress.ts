@@ -19,7 +19,7 @@ export interface CaptureHooks {
    * Called once with the number of captures the run will attempt and the
    * number it leaves out because `CaptureOptions.select` turned them down.
    */
-  onStart?: (total: number, skipped: number) => void;
+  onStart?: (total: number, skipped: number) => unknown;
   /**
    * Called inside the worker with each finished capture, pixels included,
    * before the next story on that worker starts. This is where the capture

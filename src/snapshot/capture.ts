@@ -774,7 +774,7 @@ export async function captureAll(
   const concurrency = Math.min(config.concurrency, work.length || 1);
   const fixedTime = resolveFixedTime(config.clock);
 
-  hooks.onStart?.(work.length, skipped.length);
+  await hooks.onStart?.(work.length, skipped.length);
 
   // One context per mode, shared by every page captured in that mode, with
   // the clock frozen once on it (see `createContext`). Each capture still

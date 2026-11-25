@@ -101,6 +101,7 @@ export async function runSnapshots(
         }),
       );
       const planned = new Map<string, string>();
+      const due = new Set<string>();
 
       // Each capture is compared (or, on `--update`, written) by the worker
       // that took it, as soon as it exists: no separate pass afterwards, and
@@ -110,7 +111,16 @@ export async function runSnapshots(
         options.update ? "Captured and updated" : "Captured and compared",
         () =>
           captureAll(browser, stories, resolvedSnapshotConfig, serverUrl, options.filter, {
-            onStart: (total, skipped) => {
+            onStart: async (total, skipped) => {
+              // Before the first baseline can be rewritten, the captures
+              // that are due lose their recorded fingerprint. A run that is
+              // killed halfway then leaves no entry vouching for an image
+              // it replaced.
+              const pending: Manifest = {};
+              for (const [name, fingerprint] of Object.entries(recorded)) {
+                if (!due.has(name)) pending[name] = fingerprint;
+              }
+              await writeManifest(outDir, pending);
               console.log(
                 formatPlan(
                   stories.length,
@@ -154,7 +164,10 @@ export async function runSnapshots(
               planned.set(name, fingerprint);
               // A fingerprint without its baseline says nothing: the image
               // it vouched for is gone.
-              return options.all === true || recorded[name] !== fingerprint || !existsSync(capture.outputPath);
+              const selected =
+                options.all === true || recorded[name] !== fingerprint || !existsSync(capture.outputPath);
+              if (selected) due.add(name);
+              return selected;
             },
           }),
       );

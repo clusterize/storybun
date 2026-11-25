@@ -442,7 +442,8 @@ missing is always captured.
 `--all` captures every story regardless, and still records the fingerprints.
 Use it for a scheduled full run: what fingerprints cannot see (a class name
 assembled at runtime that only now gets a rule, a stylesheet pulled in by a
-dependency) shows up there as a changed story, and a following `--update`
+dependency, a module that a stylesheet's `@config` or `@plugin` file imports)
+shows up there as a changed story, and a following `--update`
 run renders exactly those again and accepts them. Without a manifest, as on the first run or with
 baselines written by an older version, every story is captured.
 

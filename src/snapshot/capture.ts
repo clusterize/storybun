@@ -147,12 +147,40 @@ interface StoryRect {
 // why this was invisible until the fixed/portaled-content measurement
 // (`measureStoryRect` above) started reporting boxes past the viewport.
 //
+// Capturing beyond the viewport has a price, so it is paid only by a box that
+// leaves the viewport. For the length of that call Chromium lays the page out
+// against another viewport: the page sees `innerWidth` and `innerHeight` drop
+// (to 1x1 in the versions measured) and come back, with a `resize` event each
+// way. A story that answers to its viewport from script then changes under
+// the camera -- a popup anchored by a positioning library flips to the other
+// side of its field and shrinks, a layout that measures itself renders again
+// -- and the two-identical-screenshots loop in `captureStoryOrPage` either
+// accepts the disturbed state or never sees two equal frames. A box inside
+// the viewport is on the surface already; capturing it there fires no event
+// and returns the same bytes.
+//
 // CDP sessions only exist on Chromium; Firefox and WebKit have no
 // `newCDPSession`, so they fall back to the old clipped screenshot. The
 // dimension assertion below still applies to that fallback, so a capture
 // that comes back truncated on a non-Chromium browser throws instead of
 // silently becoming a baseline -- the same "loud, not silent" rule this file
 // already applies to the marker/box fallbacks above.
+/**
+ * Whether a box in document coordinates lies wholly inside what the page
+ * shows right now. Evaluated inside the page, so it must stay self-contained.
+ */
+function fitsInViewport(rect: StoryRect): boolean {
+  const left = window.scrollX;
+  const top = window.scrollY;
+  const root = document.documentElement;
+  return (
+    rect.x >= left &&
+    rect.y >= top &&
+    rect.x + rect.width <= left + root.clientWidth &&
+    rect.y + rect.height <= top + root.clientHeight
+  );
+}
+
 export async function captureClippedRegion(
   page: Page,
   rect: StoryRect,
@@ -162,9 +190,10 @@ export async function captureClippedRegion(
   try {
     const session = await page.context().newCDPSession(page);
     try {
+      const insideViewport = await page.evaluate(fitsInViewport, rect);
       const result = (await session.send("Page.captureScreenshot" as never, {
         format: "png",
-        captureBeyondViewport: true,
+        captureBeyondViewport: !insideViewport,
         fromSurface: true,
         clip: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, scale: 1 },
       } as never)) as { data: string };
@@ -256,6 +285,17 @@ function measureStoryRect(): StoryRect | null {
 
   const scrollX = window.scrollX;
   const scrollY = window.scrollY;
+  // A page cannot be scrolled above its top edge, nor past its left edge
+  // unless it is laid out right to left. What sits out there is never seen:
+  // a chart library measuring text in a span parked 20,000px above the page,
+  // a visually hidden label moved far to the left. Such an element used to
+  // stretch the box all the way out to itself, so a 300px story was captured
+  // as a 20,000px image that was blank down to its last rows.
+  const topEdge = 0;
+  const leftEdge =
+    window.getComputedStyle(document.documentElement).direction === "rtl"
+      ? Number.NEGATIVE_INFINITY
+      : 0;
 
   let left = Number.POSITIVE_INFINITY;
   let top = Number.POSITIVE_INFINITY;
@@ -267,8 +307,10 @@ function measureStoryRect(): StoryRect | null {
     if (rect.width <= 0 || rect.height <= 0) continue;
     const docLeft = rect.left + scrollX;
     const docTop = rect.top + scrollY;
-    left = Math.min(left, docLeft);
-    top = Math.min(top, docTop);
+    if (docLeft + rect.width <= leftEdge || docTop + rect.height <= topEdge) continue;
+    // An element that only pokes over the edge counts with the part on the page.
+    left = Math.min(left, Math.max(docLeft, leftEdge));
+    top = Math.min(top, Math.max(docTop, topEdge));
     right = Math.max(right, docLeft + rect.width);
     bottom = Math.max(bottom, docTop + rect.height);
   }

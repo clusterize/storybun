@@ -240,7 +240,16 @@ leave its old image behind.
 Each image is cropped to the story's own box: what the story rendered, plus
 anything it portaled next to the app root, so a menu, popover or dialog rendered
 open is captured together with its trigger. The wrapper's own chrome around the
-story stays out of the picture.
+story stays out of the picture, and so does anything parked off the page, above
+its top edge or left of its left edge: a span a chart library measures text in,
+a visually hidden label.
+
+A story that fits in the viewport is captured without the page noticing. One
+that is taller or wider is captured beyond the viewport, and for the length of
+that screenshot the browser lays the page out against another viewport: `resize`
+fires. A story that places things from script (a popup that flips when it runs
+out of room, a chart that measures its container) should therefore fit the
+configured viewport, or it may be captured mid-answer.
 
 Each snapshot captures the story's own content, cropped to its own box — not
 the viewport and not the wrapper. The wrapper still renders around it (theme

@@ -632,48 +632,57 @@ export async function collectComponents(
 
 /**
  * Rank components against a free-text query. Every whitespace-separated term
- * is matched case-insensitively against the name, import paths, source path,
- * doc comment and variants; components matching more terms rank first, then
- * by where they matched (the name counts most). Story names and notes only
+ * is matched case-insensitively, at the start of a word, against the name,
+ * import paths, source path, doc comment and variants (camelCase humps count
+ * as words, so "dialog" finds `AlertDialog` but "log" does not find `Dialog`); components matching more terms rank first, then
+ * by where they matched (the name counts most), with a small lead for
+ * publicly importable components over package-private ones. Story names and notes only
  * break ties: a story's note mentioning "dialog" says nothing about whether
  * the component is one, so it never makes a component match on its own.
  */
 export function searchComponents(components: ComponentDoc[], query: string): ComponentDoc[] {
   const q = query.trim().toLowerCase();
-  const terms = q.split(/\s+/).filter(Boolean);
+  // Punctuation inside a term ("success-light", "@acme/kit") is normalised the
+  // way the searched text is, so the term still matches as a phrase.
+  const terms = q
+    .split(/\s+/)
+    .map((t) => words(t).trim())
+    .filter(Boolean);
   if (terms.length === 0) return components;
 
   const scored = components.map((c) => {
     const fields: [string, number][] = [
-      [c.name.toLowerCase(), 10],
-      [`${c.import ?? ""} ${c.localImport ?? ""} ${c.file}`.toLowerCase(), 2],
-      [(c.description ?? "").toLowerCase(), 4],
+      // The whole name too, so "alertdialog" still finds `AlertDialog`.
+      [`${words(c.name)} ${c.name.toLowerCase()}`, 10],
+      [words(`${c.import ?? ""} ${c.localImport ?? ""} ${c.file}`), 2],
+      [words(c.description ?? ""), 4],
       [
-        (c.variants ?? [])
-          .flatMap((a) => [a.name, a.description ?? "", ...a.values.flatMap((v) => [v.name, v.description ?? ""])])
-          .join(" ")
-          .toLowerCase(),
+        words(
+          (c.variants ?? [])
+            .flatMap((a) => [a.name, a.description ?? "", ...a.values.flatMap((v) => [v.name, v.description ?? ""])])
+            .join(" "),
+        ),
         3,
       ],
     ];
-    const stories = c.stories
-      .flatMap((g) => g.stories.flatMap((s) => [s.key, s.description ?? ""]))
-      .join(" ")
-      .toLowerCase();
+    const stories = words(c.stories.flatMap((g) => g.stories.flatMap((s) => [s.key, s.description ?? ""])).join(" "));
     let score = 0;
     let matched = 0;
     for (const term of terms) {
       let hit = false;
       for (const [text, weight] of fields) {
-        if (text.includes(term)) {
+        if (text.includes(` ${term}`)) {
           score += weight;
           hit = true;
         }
       }
       if (hit) matched++;
-      if (stories.includes(term)) score += 1;
+      if (stories.includes(` ${term}`)) score += 1;
     }
     const name = c.name.toLowerCase();
+    // Among equal matches, prefer what any package can import over what is
+    // private to one: the shared component is usually the one to reuse.
+    if (matched > 0 && c.import) score += 3;
     if (name === q) score += 1000;
     else if (name.startsWith(q)) score += 100;
     return { c, score, matched };
@@ -683,6 +692,18 @@ export function searchComponents(components: ComponentDoc[], query: string): Com
     .filter((s) => s.matched > 0)
     .sort((a, b) => b.matched - a.matched || b.score - a.score || a.c.name.localeCompare(b.c.name))
     .map((s) => s.c);
+}
+
+/**
+ * Lowercased text with a space before every word, camelCase hump and run of
+ * punctuation, so `includes(" " + term)` matches a term only at a word start.
+ */
+function words(text: string): string {
+  return ` ${text
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+    .replace(/[^A-Za-z0-9]+/g, " ")
+    .toLowerCase()}`;
 }
 
 // --- syntax helpers ---------------------------------------------------------

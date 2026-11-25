@@ -4,7 +4,7 @@ import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { collectComponents, parseDocComment, searchComponents, type ComponentDoc } from "./components.ts";
-import { formatComponent, summarize } from "./components-cli.ts";
+import { formatComponent, formatIndexLine, summarize } from "./components-cli.ts";
 import { loadConfig } from "./config.ts";
 import { scanStories } from "./scanner.ts";
 
@@ -224,6 +224,12 @@ describe("searchComponents", () => {
     expect(searchComponents(components, "log retry").map((c) => c.name)).toEqual(["JobLog"]);
   });
 
+  test("a term matches only at the start of a word or camelCase hump", () => {
+    expect(searchComponents(components, "header").map((c) => c.name)).toEqual(["JobHeader"]);
+    expect(searchComponents(components, "eader")).toEqual([]);
+    expect(searchComponents(components, "jobheader").map((c) => c.name)).toEqual(["JobHeader"]);
+  });
+
   test("components matching more terms rank above those matching fewer", () => {
     expect(searchComponents(components, "job title").map((c) => c.name)).toEqual(["JobHeader", "JobBoard", "JobLog"]);
   });
@@ -231,8 +237,27 @@ describe("searchComponents", () => {
 
 describe("output", () => {
   test("the index is one short record per component", () => {
-    expect(summarize(byName("Badge"))).toEqual({ name: "Badge", import: "@acme/kit/ui", summary: "A short status label." });
-    expect(summarize(byName("JobBoard"))).toEqual({ name: "JobBoard", import: "@/job/job-board", summary: null });
+    expect(summarize(byName("Badge"))).toEqual({
+      name: "Badge",
+      import: "@acme/kit/ui",
+      package: "@acme/kit",
+      public: true,
+      summary: "A short status label.",
+    });
+    expect(summarize(byName("JobBoard"))).toEqual({
+      name: "JobBoard",
+      import: "@/job/job-board",
+      package: "@acme/app",
+      public: false,
+      summary: null,
+    });
+  });
+
+  test("an index line names the package a private import works in, and why a component is deprecated", () => {
+    expect(formatIndexLine(summarize(byName("JobBoard")))).toBe("JobBoard  @/job/job-board  (inside @acme/app)");
+    expect(
+      formatIndexLine({ ...summarize(byName("Badge")), deprecated: "Use StatusDot. It scales better." }),
+    ).toBe("Badge  @acme/kit/ui  — Deprecated. Use StatusDot.");
   });
 
   test("the full view marks a missing description and groups stories by file", () => {

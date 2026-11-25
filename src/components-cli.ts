@@ -18,6 +18,10 @@ export interface ComponentSummary {
   name: string;
   /** The import line other packages use, else the package's own alias, else the source file. */
   import: string;
+  /** Declaring package; an `import` that is not public resolves only inside it. */
+  package: string;
+  /** False when `import` is the package's own alias or a source path, usable only inside `package`. */
+  public: boolean;
   /** First sentence of the doc comment; null when it has none. */
   summary: string | null;
   deprecated?: string;
@@ -68,7 +72,12 @@ export async function runComponents(cwd: string, options: ComponentsOptions): Pr
   }
 
   if (components.length === 0) {
-    console.error(query ? `No component matches ${JSON.stringify(query)}.` : "No component found in any story.");
+    console.error(
+      query
+        ? `No component matches ${JSON.stringify(query)}.`
+        : `No component found in ${stories.length} story file(s). ` +
+            "If they import components, are the project's dependencies installed?",
+    );
     return 1;
   }
 
@@ -79,10 +88,7 @@ export async function runComponents(cwd: string, options: ComponentsOptions): Pr
     await print(
       components
         .map(summarize)
-        .map((c) => {
-          const summary = c.deprecated !== undefined ? `Deprecated. ${c.deprecated}` : c.summary;
-          return `${c.name.padEnd(width)}  ${c.import}${summary ? `  — ${firstSentence(summary)}` : ""}`;
-        })
+        .map((c) => formatIndexLine(c, width))
         .join("\n"),
     );
     const undocumented = components.filter((c) => c.description === null).length;
@@ -104,9 +110,19 @@ export function summarize(c: ComponentDoc): ComponentSummary {
   return {
     name: c.name,
     import: from,
+    package: c.package,
+    public: c.import !== undefined,
     summary: c.description ? firstSentence(c.description) : null,
     ...(c.deprecated !== undefined ? { deprecated: c.deprecated } : {}),
   };
+}
+
+/** One index line: name, where to import it from, and the summary (or why not to use it). */
+export function formatIndexLine(c: ComponentSummary, width = 0): string {
+  const summary =
+    c.deprecated !== undefined ? `Deprecated.${c.deprecated ? ` ${firstSentence(c.deprecated)}` : ""}` : c.summary;
+  const where = c.public ? "" : `  (inside ${c.package})`;
+  return `${c.name.padEnd(width)}  ${c.import}${where}${summary ? `  — ${summary}` : ""}`;
 }
 
 export function formatComponent(c: ComponentDoc): string {

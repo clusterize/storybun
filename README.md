@@ -114,9 +114,17 @@ storybun components --full             # every component in full; large, rarely 
 Search is the intended entry point, for coding agents especially: the full
 catalogue of a large project runs to megabytes, so nothing prints it unless
 asked for with `--full`. A query matches a component by its name, import
-paths, source path, doc comment and variants. Story names and notes only
-rank the matches; a story note mentioning "dialog" does not make a component
-one.
+paths, source path, doc comment and variants, each term at the start of a
+word or camelCase hump ("dialog" finds `AlertDialog`, "log" does not find
+`Dialog`). Story names and notes only rank the matches; a story note
+mentioning "dialog" does not make a component one. Among equal matches,
+components other packages can import rank above package-private ones, and
+the index marks the latter with the package they work in:
+
+```
+Badge        @acme/kit/ui  — A short status label.
+JobBoard     @/job/job-board  (inside @acme/app)
+```
 
 ```
 Badge

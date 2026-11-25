@@ -6,6 +6,7 @@ import type { SnapshotMode } from "../types.ts";
 import { buildSnapshotEntry } from "./entry.ts";
 import { startSnapshotServer } from "./server.ts";
 import { captureOne } from "./capture.ts";
+import { assertRendered, BlankCaptureError } from "./floor.ts";
 import { loadPlaywright } from "./playwright.ts";
 
 export interface ShotCommandOptions {
@@ -152,6 +153,17 @@ export async function runShot(
       const { width, height } = pngSize(buffer);
       const modeNote = modeResult.name === undefined ? "" : `, ${modeResult.name}`;
       console.log(`${outPath} (${width}x${height}${modeNote})`);
+
+      // The picture is written either way, but a blank one is the same fault
+      // a snapshot run fails on: say so, and exit non-zero, so whoever asked
+      // for the picture (often a coding agent) does not take it as a render.
+      try {
+        assertRendered({ storyKey: resolved.story.key, buffer }, config.snapshot);
+      } catch (err) {
+        if (!(err instanceof BlankCaptureError)) throw err;
+        console.error(`${resolved.story.key}: ${err.message.replace(/; not compared and not written$/, "")}`);
+        return 1;
+      }
     } finally {
       await browser.close();
     }

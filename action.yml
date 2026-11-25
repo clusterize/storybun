@@ -22,7 +22,10 @@ inputs:
     description: Extra arguments for `storybun snapshot`, e.g. `--codeowners`.
     default: ""
   update:
-    description: Run with `--update`, replacing every baseline with this run's render (for the main branch).
+    description: Run with `--update`, replacing the baseline of every captured story with this run's render (for the main branch).
+    default: "false"
+  all:
+    description: Run with `--all`, capturing every story instead of only those whose inputs changed since their baseline (for a scheduled full run).
     default: "false"
   quiet:
     description: Pass `--quiet`; failures, phases and the summary still print.
@@ -102,6 +105,9 @@ outputs:
   capture-failed:
     value: ${{ steps.summary.outputs.capture-failed }}
     description: Count.
+  unchanged:
+    value: ${{ steps.summary.outputs.unchanged }}
+    description: Count of captures left out because nothing they render from changed since their baseline.
   report-url:
     description: Public URL of the HTML report, empty when not published.
     value: ${{ steps.publish.outputs.report-url }}
@@ -123,6 +129,7 @@ runs:
         STORYBUN_COMMAND: ${{ inputs.command }}
         STORYBUN_ARGS: ${{ inputs.args }}
         STORYBUN_UPDATE: ${{ inputs.update }}
+        STORYBUN_ALL: ${{ inputs.all }}
         STORYBUN_QUIET: ${{ inputs.quiet }}
         STORYBUN_REPORT_IMAGES: ${{ inputs.publish-images }}
         SNAPSHOT_DIR: ${{ inputs.snapshot-dir }}
@@ -131,6 +138,7 @@ runs:
         # step reads that back from report.json, so the two cannot disagree.
         flags=(--json --html --report-images "$STORYBUN_REPORT_IMAGES")
         [ "$STORYBUN_UPDATE" = "true" ] && flags+=(--update)
+        [ "$STORYBUN_ALL" = "true" ] && flags+=(--all)
         [ "$STORYBUN_QUIET" = "true" ] && flags+=(--quiet)
         # shellcheck disable=SC2086
         set +e

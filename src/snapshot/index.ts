@@ -1,4 +1,5 @@
-import { join } from "path";
+import { basename, join } from "path";
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { loadConfig } from "../config.ts";
 import { scanStories } from "../scanner.ts";
@@ -14,9 +15,12 @@ import { buildReport, findRemovedBaselines, type ReportImages } from "./report-m
 import { loadReportTemplate } from "./report-html.tsx";
 import { resolveReportPath, writeHtmlReport, writeJsonReport } from "./report-files.ts";
 import { formatDuration, formatPlan, formatProgress } from "./progress.ts";
+import { captureFingerprint, fingerprintStories, readManifest, writeManifest, type Manifest } from "./fingerprint.ts";
 
 interface SnapshotOptions {
   update: boolean;
+  /** `--all`: capture every story, also those unchanged since their baseline. */
+  all?: boolean;
   filter?: string;
   codeowners: boolean;
   /** `--json [path]`: true for the default `<outDir>/report.json`. */
@@ -82,14 +86,43 @@ export async function runSnapshots(
       const singleViewport = snapshotConfig.viewports.length === 1;
       const exportCount = stories.reduce((n, s) => n + s.exports.length, 0);
 
+      // What each capture would be rendered from, hashed. A capture whose
+      // fingerprint is the one recorded with its baseline renders the same
+      // image again, so it is left out of the run unless `--all` asks for it.
+      const recorded = await readManifest(outDir);
+      const storyFingerprints = await timed("Fingerprinted stories", () =>
+        fingerprintStories({
+          graph: buildResult.graph,
+          outputDir: buildResult.buildDir,
+          loaded: buildResult.loaded,
+          stories,
+          config: snapshotConfig,
+          browserVersion: browser.version(),
+        }),
+      );
+      const planned = new Map<string, string>();
+
       // Each capture is compared (or, on `--update`, written) by the worker
       // that took it, as soon as it exists: no separate pass afterwards, and
       // no PNG held in memory past its own comparison.
       const compared: CompareResult[] = [];
-      const { captures, failures } = await timed(
+      const outcome = await timed(
         options.update ? "Captured and updated" : "Captured and compared",
         () =>
           captureAll(browser, stories, resolvedSnapshotConfig, serverUrl, options.filter, {
+            onStart: (total, skipped) => {
+              console.log(
+                formatPlan(
+                  stories.length,
+                  exportCount,
+                  snapshotConfig.viewports.length,
+                  Object.keys(snapshotConfig.modes).length,
+                  total,
+                  Math.min(snapshotConfig.concurrency, total || 1),
+                  skipped,
+                ) + (options.filter ? ` (filter: ${options.filter})` : ""),
+              );
+            },
             onCapture: async (capture) => {
               // Before either path: a blank capture fails here, so it is
               // neither compared nor written as a baseline.
@@ -106,35 +139,37 @@ export async function runSnapshots(
               compared.push(result);
               return describeCompareOutcome(result);
             },
-            onStart: (total) => {
-              console.log(
-                formatPlan(
-                  stories.length,
-                  exportCount,
-                  snapshotConfig.viewports.length,
-                  Object.keys(snapshotConfig.modes).length,
-                  total,
-                  Math.min(snapshotConfig.concurrency, total || 1),
-                ) + (options.filter ? ` (filter: ${options.filter})` : ""),
-              );
-            },
             onProgress: (event) => {
               // A failure is always worth a line; the rest only when asked.
               if (!options.quiet || event.error) console.log(formatProgress(event, singleViewport));
             },
+          }, {
+            select: (capture) => {
+              const name = basename(capture.outputPath);
+              const fingerprint = captureFingerprint(
+                storyFingerprints.get(capture.story.filePath)!,
+                capture.viewport,
+                capture.mode,
+              );
+              planned.set(name, fingerprint);
+              // A fingerprint without its baseline says nothing: the image
+              // it vouched for is gone.
+              return options.all === true || recorded[name] !== fingerprint || !existsSync(capture.outputPath);
+            },
           }),
       );
+      const { captures, failures, skipped } = outcome;
 
-      if (captures.length === 0 && failures.length === 0) {
+      if (captures.length === 0 && failures.length === 0 && skipped.length === 0) {
         console.log("No stories matched the filter.");
         return 0;
       }
 
       if (options.update) {
-        printUpdateReport(captures.length);
+        printUpdateReport(captures.length, skipped.length);
         exitCode = 0;
       } else {
-        printReport(compared);
+        printReport(compared, skipped.length);
         exitCode = getExitCode(compared);
       }
 
@@ -155,7 +190,7 @@ export async function runSnapshots(
         ? []
         : await findRemovedBaselines(
             outDir,
-            [...captures, ...failures].map((c) => c.outputPath),
+            [...captures, ...failures, ...skipped].map((c) => c.outputPath),
           );
       const prune = options.update && !options.filter && removed.length > 0;
 
@@ -164,6 +199,7 @@ export async function runSnapshots(
           captures,
           compared: options.update ? null : compared,
           failures,
+          unchanged: skipped.length,
           removed,
           pruned: prune,
           config: resolvedSnapshotConfig,
@@ -187,6 +223,22 @@ export async function runSnapshots(
           console.log(`HTML report: ${path}`);
         }
       }
+
+      // Record what each baseline now stands for. A baseline that was
+      // written, or that this run's render matched, gets the fingerprint of
+      // that render; one that changed or could not be captured keeps what it
+      // had, so the next run captures it again. Entries of stories that are
+      // gone are dropped, except under a filter, which says nothing about
+      // the stories it left out.
+      const manifest: Manifest = {};
+      for (const [name, fingerprint] of Object.entries(recorded)) {
+        if (options.filter || planned.has(name)) manifest[name] = fingerprint;
+      }
+      const verified = options.update
+        ? captures.map((c) => c.outputPath)
+        : compared.filter((r) => r.status !== "fail").map((r) => r.outputPath);
+      for (const path of verified) manifest[basename(path)] = planned.get(basename(path))!;
+      await writeManifest(outDir, manifest);
 
       // After the report, which still measured the files.
       if (prune) {

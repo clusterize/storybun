@@ -62,4 +62,13 @@ describe("formatPlan", () => {
       "Capturing 10 snapshots (5 stories in 2 files × 2 viewports) with concurrency 4",
     );
   });
+
+  test("says how many captures are left out as unchanged", () => {
+    expect(formatPlan(42, 309, 1, 2, 18, 4, 600)).toBe(
+      "Capturing 18 of 618 snapshots (309 stories in 42 files × 2 modes) with concurrency 4; 600 unchanged since their baseline",
+    );
+    expect(formatPlan(2, 2, 1, 0, 1, 1, 1)).toBe(
+      "Capturing 1 of 2 snapshots (2 stories in 2 files) with concurrency 1; 1 unchanged since its baseline",
+    );
+  });
 });

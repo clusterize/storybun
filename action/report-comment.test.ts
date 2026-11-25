@@ -46,6 +46,17 @@ describe("buildComment", () => {
     expect(body).toBe(`${COMMENT_MARKER}\nVisual snapshots match the baseline at \`0123456\`.`);
   });
 
+  test("says how many stories were left out as unchanged", () => {
+    const passing = buildComment(report([entry("A--B", "pass")], { unchanged: 4810 }));
+    expect(passing).toBe(
+      `${COMMENT_MARKER}\nVisual snapshots match the baseline at \`0123456\`. 4,810 unchanged since their baseline were not captured.`,
+    );
+
+    const changed = buildComment(report([entry("A--B", "changed")], { unchanged: 1 }));
+    expect(changed).toContain("| passed | changed | new | removed | capture failed | unchanged, not captured |");
+    expect(changed).toContain("| 0 | 1 | 0 | 0 | 0 | 1 |");
+  });
+
   test("lists changed, new, removed and failed stories with a table and the report link", () => {
     const body = buildComment(
       report([

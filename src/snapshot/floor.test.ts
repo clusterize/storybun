@@ -49,6 +49,7 @@ function config(overrides: Partial<ResolvedSnapshotConfig> = {}): ResolvedSnapsh
     timezoneId: "UTC",
     locale: "en-US",
     modes: {},
+    environment: "",
     report: { component: null },
     ...overrides,
   };

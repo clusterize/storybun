@@ -50,6 +50,7 @@ function config(): ResolvedSnapshotConfig {
     timezoneId: "UTC",
     locale: "en-US",
     modes: { light: { colorScheme: "light" }, dark: { colorScheme: "dark" } },
+    environment: "",
     report: { component: null },
   };
 }
@@ -197,6 +198,7 @@ describe("buildReport", () => {
       removed: 1,
       captureFailed: 1,
       updated: 0,
+      unchanged: 0,
       exitCode: 1,
     });
     expect(report.version).toBe(1);

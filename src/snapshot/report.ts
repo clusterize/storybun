@@ -1,7 +1,11 @@
 import type { CaptureFailure } from "./capture.ts";
 import type { CompareResult } from "./compare.ts";
 
-export function printReport(results: CompareResult[]): void {
+function unchangedLine(count: number): string {
+  return `  = ${count} unchanged since ${count === 1 ? "its" : "their"} baseline, not captured`;
+}
+
+export function printReport(results: CompareResult[], unchanged = 0): void {
   let passCount = 0;
   let newCount = 0;
   const failed: CompareResult[] = [];
@@ -22,6 +26,9 @@ export function printReport(results: CompareResult[]): void {
   }
   if (newCount > 0) {
     console.log(`  + ${newCount} new`);
+  }
+  if (unchanged > 0) {
+    console.log(unchangedLine(unchanged));
   }
 
   if (failed.length > 0) {
@@ -49,8 +56,10 @@ export function printFailures(failures: CaptureFailure[]): void {
   console.log();
 }
 
-export function printUpdateReport(count: number): void {
-  console.log(`\nstorybun snapshot: updated ${count} baseline(s)\n`);
+export function printUpdateReport(count: number, unchanged = 0): void {
+  console.log(`\nstorybun snapshot: updated ${count} baseline(s)`);
+  if (unchanged > 0) console.log(unchangedLine(unchanged));
+  console.log();
 }
 
 const PRUNE_LIST_LIMIT = 20;

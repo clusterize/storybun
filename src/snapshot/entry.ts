@@ -2,6 +2,7 @@ import { join, basename } from "path";
 import { tmpdir } from "os";
 import type { StoryEntry, PackageInfo, ResolvedConfig } from "../types.ts";
 import { findReactResolveDir, createReactPlugin } from "../build-utils.ts";
+import { recordLoads, type BuildGraph, type LoadedContents } from "./fingerprint.ts";
 
 const DEFAULT_WRAPPER = join(import.meta.dir, "..", "ui", "Wrapper.tsx");
 
@@ -190,6 +191,10 @@ export interface SnapshotBuildResult {
   buildDir: string;
   assets: Map<string, string>;
   html: string;
+  /** The bundler's metafile: which inputs ended up in which chunk. */
+  graph: BuildGraph;
+  /** Hashes of the module contents plugins produced during the build. */
+  loaded: LoadedContents;
 }
 
 export async function buildSnapshotEntry(
@@ -208,7 +213,10 @@ export async function buildSnapshotEntry(
   const allPackagePlugins = [...packages.values()].flatMap(
     (pkg) => pkg.config.plugins,
   );
-  const plugins = [reactPlugin, ...config.plugins, ...allPackagePlugins];
+  // The fingerprints need the content of every module in a story's page,
+  // including the ones a plugin generates instead of reading from disk.
+  const loaded: LoadedContents = new Map();
+  const plugins = [reactPlugin, ...recordLoads([...config.plugins, ...allPackagePlugins], loaded)];
 
   const result = await Bun.build({
     entrypoints: [virtualPath],
@@ -220,6 +228,7 @@ export async function buildSnapshotEntry(
     minify: false,
     naming: "[dir]/[name]-[hash].[ext]",
     plugins,
+    metafile: true,
   });
 
   if (!result.success) {
@@ -238,7 +247,9 @@ export async function buildSnapshotEntry(
 
   const html = generateSnapshotHtml(assets);
 
-  return { buildDir, assets, html };
+  const graph = (typeof result.metafile === "string" ? JSON.parse(result.metafile) : result.metafile) as BuildGraph;
+
+  return { buildDir, assets, html, graph, loaded };
 }
 
 // `data-storybun-snapshot` on <html> is the documented signal that a page is

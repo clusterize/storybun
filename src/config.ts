@@ -16,6 +16,7 @@ const snapshotDefaults: ResolvedSnapshotConfig = {
   timezoneId: "UTC",
   locale: "en-US",
   modes: {},
+  environment: "",
   report: { component: null },
 };
 

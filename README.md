@@ -42,7 +42,7 @@ Open [http://localhost:5175](http://localhost:5175).
 
 ```
 storybun                       Start the dev server
-storybun snapshot [options]    Capture every story and compare against its baseline
+storybun snapshot [options]    Capture the changed stories and compare against their baselines
 storybun list [options]        Print every story key
 storybun shot <story> [opts]   Write a PNG of one story, leaving baselines untouched
 storybun components [query]    Index of the components stories demonstrate, or search them
@@ -228,9 +228,11 @@ export default {
 
 ### Visual Snapshots
 
-`bunx storybun snapshot` renders every story in headless Chromium and compares it
-against the baseline in `outDir`, writing `<story>.actual.png` and
-`<story>.diff.png` for anything that moved. `--update` accepts the current render
+`bunx storybun snapshot` renders stories in headless Chromium and compares each
+against its baseline in `outDir`, writing `<story>.actual.png` and
+`<story>.diff.png` for anything that moved. A story is rendered when what it is
+built from has changed since its baseline; see
+[Capturing only what changed](#capturing-only-what-changed). `--update` accepts the current render
 as the new baseline and deletes baselines that no story produces anymore
 (unless `--filter` narrowed the run), so a renamed or deleted story does not
 leave its old image behind.
@@ -397,6 +399,54 @@ guessing from the URL.
 **`waitTimeout`** is deprecated and ignored. It was a blind sleep after the
 first-paint signal; the readiness contract replaces it. A config that still
 sets it prints a warning once.
+
+### Capturing only what changed
+
+A run does not render a story whose result is already known. With each
+baseline, `outDir/manifest.json` records a fingerprint of everything that
+capture was rendered from. The next run builds the bundle, works out the
+fingerprints again and captures only where they differ:
+
+```
+Fingerprinted stories in 240ms
+Capturing 38 of 618 snapshots (309 stories in 42 files × 2 modes) with concurrency 4; 580 unchanged since their baseline
+```
+
+Nothing is configured and no path rules are kept: what a story depends on is
+read from the bundle that was just built. A fingerprint covers
+
+- **the modules the story's page loads**: its own chunk and everything that
+  chunk reaches, the Wrapper included. Project source is hashed after
+  transpiling, so a type, a comment or formatting is not a change, and neither
+  is a new export in a barrel or another story file being added. A dependency
+  is hashed as installed, so a version bump recaptures exactly the stories
+  that load that package. A module a plugin generates is hashed as the plugin
+  returned it. TypeScript enums are followed separately, because the bundler
+  inlines their values into the modules that use them;
+- **the stylesheet sources**: the stylesheets the bundle links, everything they
+  `@import`, `@plugin` or `@config`, the files their `url()`s point at, and the
+  `/*! ... */` banners of the generated sheets. A change to any of them
+  captures every story. The generated sheet itself is left out: a
+  utility-class compiler adds a rule whenever a component gains a class, and
+  that rule only matches elements in the components that changed;
+- **the environment**: this tool's own source, the Bun and browser versions,
+  `clock`, `timezoneId`, `locale`, the capture's viewport and mode, and
+  `snapshot.environment`, a string for whatever else the run cannot see, such
+  as the tag of the CI image that supplies the system fonts.
+
+A capture that matches its baseline, or is written with `--update`, records
+its new fingerprint. One that changed keeps the old one and is captured again
+on every run until its baseline is accepted. A story whose baseline file is
+missing is always captured.
+
+`--all` captures every story regardless, and still records the fingerprints.
+Use it for a scheduled full run: what fingerprints cannot see (a class name
+assembled at runtime that only now gets a rule, a stylesheet pulled in by a
+dependency) shows up there. Without a manifest, as on the first run or with
+baselines written by an older version, every story is captured.
+
+The manifest belongs with the baselines: cache or commit it together with the
+images. A baseline restored without it is simply captured again.
 
 ### Progress and timing
 
@@ -602,7 +652,7 @@ steps:
 
 Every run writes both reports, adds a job summary with the counts, and exposes
 them as outputs (`exit-code`, `needs-review`, `changed`, `new`, `removed`,
-`capture-failed`, `report-url`, ...). When a bucket is configured the images go
+`capture-failed`, `unchanged`, `report-url`, ...). When a bucket is configured the images go
 up under `pr-<number>/<sha>/` (`<ref>/<sha>/` outside pull requests) with the
 two report files next to them, so the relative image paths in `report.html`
 resolve unchanged; the comment links to `<public-base-url>/<prefix>/report.html`.
@@ -616,7 +666,9 @@ or capture failures; `fail-on-changes: false` turns that into an output only.
 
 On the main branch, `update: true` runs `--update` so a following
 `actions/cache/save` step stores the refreshed baselines, with the baselines of
-deleted or renamed stories pruned. Inputs cover the
+deleted or renamed stories pruned. Only the stories that changed since the
+restored baselines are rendered there too; `all: true` runs `--all`, for a
+scheduled job that renders everything. Inputs cover the
 working directory, the storybun command, extra arguments such as
 `--codeowners`, the snapshot directory (it must match `snapshot.outDir`), and
 whether to install Chromium; see `action.yml` for the full list.

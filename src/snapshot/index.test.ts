@@ -103,6 +103,22 @@ describe("a snapshot run captures only what changed since the baselines", () => 
     expect((await run()).captured).toEqual(["Label--Plain: new"]);
   }, 60_000);
 
+  test("a baseline --all finds stale is captured from then on, and a plain update accepts it", async () => {
+    // Nothing is edited: the card's baseline is replaced by another image,
+    // as if it had gone stale in a way no fingerprint could see.
+    const snapshots = join(dir, "__snapshots__");
+    await Bun.write(join(snapshots, "Card--Filled.png"), Bun.file(join(snapshots, "Label--Plain.png")));
+    expect((await run()).captured).toEqual([]);
+
+    const full = await run("--all");
+    expect(full.exitCode).toBe(1);
+    expect(full.captured).toEqual(["Card--Filled: changed", "Label--Plain: pass"]);
+
+    expect((await run()).captured).toEqual(["Card--Filled: changed"]);
+    expect((await run("--update")).captured).toEqual(["Card--Filled: updated"]);
+    expect((await run()).captured).toEqual([]);
+  }, 120_000);
+
   test("--all captures every story regardless", async () => {
     const all = await run("--all");
     expect(all.captured).toEqual(["Card--Filled: pass", "Label--Plain: pass"]);

@@ -435,14 +435,15 @@ read from the bundle that was just built. A fingerprint covers
   as the tag of the CI image that supplies the system fonts.
 
 A capture that matches its baseline, or is written with `--update`, records
-its new fingerprint. One that changed keeps the old one and is captured again
-on every run until its baseline is accepted. A story whose baseline file is
+its new fingerprint. One that changed loses its fingerprint and is captured
+again on every run until its baseline is accepted. A story whose baseline file is
 missing is always captured.
 
 `--all` captures every story regardless, and still records the fingerprints.
 Use it for a scheduled full run: what fingerprints cannot see (a class name
 assembled at runtime that only now gets a rule, a stylesheet pulled in by a
-dependency) shows up there. Without a manifest, as on the first run or with
+dependency) shows up there as a changed story, and a following `--update`
+run renders exactly those again and accepts them. Without a manifest, as on the first run or with
 baselines written by an older version, every story is captured.
 
 The manifest belongs with the baselines: cache or commit it together with the

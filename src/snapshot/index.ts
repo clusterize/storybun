@@ -226,18 +226,25 @@ export async function runSnapshots(
 
       // Record what each baseline now stands for. A baseline that was
       // written, or that this run's render matched, gets the fingerprint of
-      // that render; one that changed or could not be captured keeps what it
-      // had, so the next run captures it again. Entries of stories that are
-      // gone are dropped, except under a filter, which says nothing about
-      // the stories it left out.
+      // that render. One that this run's render did not match loses its
+      // fingerprint: nothing vouches for it until it is accepted, so every
+      // run captures it, also when the mismatch was found by `--all` with
+      // nothing edited. One that could not be captured keeps what it had.
+      // Entries of stories that are gone are dropped, except under a filter,
+      // which says nothing about the stories it left out.
       const manifest: Manifest = {};
       for (const [name, fingerprint] of Object.entries(recorded)) {
         if (options.filter || planned.has(name)) manifest[name] = fingerprint;
       }
-      const verified = options.update
-        ? captures.map((c) => c.outputPath)
-        : compared.filter((r) => r.status !== "fail").map((r) => r.outputPath);
-      for (const path of verified) manifest[basename(path)] = planned.get(basename(path))!;
+      if (options.update) {
+        for (const c of captures) manifest[basename(c.outputPath)] = planned.get(basename(c.outputPath))!;
+      } else {
+        for (const r of compared) {
+          const name = basename(r.outputPath);
+          if (r.status === "fail") delete manifest[name];
+          else manifest[name] = planned.get(name)!;
+        }
+      }
       await writeManifest(outDir, manifest);
 
       // After the report, which still measured the files.

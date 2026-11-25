@@ -33,13 +33,18 @@ export interface VariantAxis {
 }
 
 export interface ComponentStory {
+  /** Story key, as `storybun shot` and `storybun list` take it. */
   key: string;
-  export: string;
+  description?: string;
+  /** Existing baseline images of this story, relative to the project root; omitted when there are none. */
+  baselines?: string[];
+}
+
+/** A component's stories, grouped by the file declaring them. */
+export interface ComponentStoryFile {
   /** Story file, relative to the project root. */
   file: string;
-  description?: string;
-  /** Existing baseline images of this story, relative to the project root. */
-  baselines: string[];
+  stories: ComponentStory[];
 }
 
 export interface ComponentDoc {
@@ -50,15 +55,17 @@ export interface ComponentDoc {
   line: number;
   /** Name of the package that declares it. */
   package: string;
-  description?: string;
+  /** The declaration's doc comment; null when it has none, so the gap is visible. */
+  description: string | null;
   /** Set when the doc comment has `@deprecated`; the tag text, or "" when it has none. */
   deprecated?: string;
   /** Import from outside the package, through its package.json `exports`. */
   import?: string;
   /** Import from inside the package, through a tsconfig `paths` alias. */
   localImport?: string;
-  variants: VariantAxis[];
-  stories: ComponentStory[];
+  /** cva/tv-style variants the component uses; omitted when it has none. */
+  variants?: VariantAxis[];
+  stories: ComponentStoryFile[];
 }
 
 export interface CatalogueResult {
@@ -528,17 +535,18 @@ export class Catalogue {
     const deprecated = doc?.tags.find((t) => t.name === "deprecated");
     const publicSpec = this.publicSpecifier(decl);
     const localSpec = this.localSpecifier(decl);
+    const variants = this.variantsOf(decl);
     const line = decl.sourceFile.getLineAndCharacterOfPosition(decl.docNode.getStart(decl.sourceFile)).line + 1;
     return {
       name: decl.name,
       file: relative(this.cwd, decl.file),
       line,
       package: this.packageName(decl.file),
-      ...(doc?.description ? { description: doc.description } : {}),
+      description: doc?.description ?? null,
       ...(deprecated ? { deprecated: deprecated.text } : {}),
       ...(publicSpec ? { import: `import { ${decl.name} } from '${publicSpec}'` } : {}),
       ...(localSpec ? { localImport: `import { ${decl.name} } from '${localSpec}'` } : {}),
-      variants: this.variantsOf(decl),
+      ...(variants.length > 0 ? { variants } : {}),
     };
   }
 }
@@ -582,18 +590,17 @@ export async function collectComponents(
       continue;
     }
 
-    const storyDocs: ComponentStory[] = story.exports.map((exportName) => {
+    const storyDocs = story.exports.map((exportName) => {
       const baselines = (modeNames.length > 0 ? modeNames : [undefined])
         .map((mode) => storyOutputPath(outDir, story.path, exportName, viewport, viewports.length === 1, mode))
         .filter((p) => existsSync(resolve(cwd, p)));
       const description = info.exportDocs.get(exportName);
-      return {
+      const doc: ComponentStory = {
         key: `${story.path}--${exportName}`,
-        export: exportName,
-        file: relFile,
         ...(description ? { description } : {}),
-        baselines,
+        ...(baselines.length > 0 ? { baselines } : {}),
       };
+      return { exportName, doc };
     });
 
     for (const { decl, local } of info.components) {
@@ -605,9 +612,14 @@ export async function collectComponents(
       }
       // The stories that render it; all of the file's when none visibly does
       // (a story built by a factory from another module, say).
-      const rendering = storyDocs.filter((s) => info.exportRenders.get(s.export)?.has(local));
-      for (const s of rendering.length > 0 ? rendering : storyDocs) {
-        if (!doc.stories.some((existing) => existing.key === s.key)) doc.stories.push(s);
+      const rendering = storyDocs.filter((s) => info.exportRenders.get(s.exportName)?.has(local));
+      let group = doc.stories.find((g) => g.file === relFile);
+      if (!group) {
+        group = { file: relFile, stories: [] };
+        doc.stories.push(group);
+      }
+      for (const { doc: s } of rendering.length > 0 ? rendering : storyDocs) {
+        if (!group.stories.some((existing) => existing.key === s.key)) group.stories.push(s);
       }
     }
   }
@@ -620,42 +632,57 @@ export async function collectComponents(
 
 /**
  * Rank components against a free-text query. Every whitespace-separated term
- * is matched case-insensitively against the name, import paths, source path,
- * doc comment, variants and stories; components matching more terms rank
- * first, then by where they matched (the name counts most).
+ * is matched case-insensitively, at the start of a word, against the name,
+ * import paths, source path, doc comment and variants (camelCase humps count
+ * as words, so "dialog" finds `AlertDialog` but "log" does not find `Dialog`); components matching more terms rank first, then
+ * by where they matched (the name counts most), with a small lead for
+ * publicly importable components over package-private ones. Story names and notes only
+ * break ties: a story's note mentioning "dialog" says nothing about whether
+ * the component is one, so it never makes a component match on its own.
  */
 export function searchComponents(components: ComponentDoc[], query: string): ComponentDoc[] {
   const q = query.trim().toLowerCase();
-  const terms = q.split(/\s+/).filter(Boolean);
+  // Punctuation inside a term ("success-light", "@acme/kit") is normalised the
+  // way the searched text is, so the term still matches as a phrase.
+  const terms = q
+    .split(/\s+/)
+    .map((t) => words(t).trim())
+    .filter(Boolean);
   if (terms.length === 0) return components;
 
   const scored = components.map((c) => {
     const fields: [string, number][] = [
-      [c.name.toLowerCase(), 10],
-      [`${c.import ?? ""} ${c.localImport ?? ""} ${c.file}`.toLowerCase(), 2],
-      [(c.description ?? "").toLowerCase(), 4],
+      // The whole name too, so "alertdialog" still finds `AlertDialog`.
+      [`${words(c.name)} ${c.name.toLowerCase()}`, 10],
+      [words(`${c.import ?? ""} ${c.localImport ?? ""} ${c.file}`), 2],
+      [words(c.description ?? ""), 4],
       [
-        c.variants
-          .flatMap((a) => [a.name, a.description ?? "", ...a.values.flatMap((v) => [v.name, v.description ?? ""])])
-          .join(" ")
-          .toLowerCase(),
+        words(
+          (c.variants ?? [])
+            .flatMap((a) => [a.name, a.description ?? "", ...a.values.flatMap((v) => [v.name, v.description ?? ""])])
+            .join(" "),
+        ),
         3,
       ],
-      [c.stories.flatMap((s) => [s.export, s.description ?? ""]).join(" ").toLowerCase(), 1],
     ];
+    const stories = words(c.stories.flatMap((g) => g.stories.flatMap((s) => [s.key, s.description ?? ""])).join(" "));
     let score = 0;
     let matched = 0;
     for (const term of terms) {
       let hit = false;
       for (const [text, weight] of fields) {
-        if (text.includes(term)) {
+        if (text.includes(` ${term}`)) {
           score += weight;
           hit = true;
         }
       }
       if (hit) matched++;
+      if (stories.includes(` ${term}`)) score += 1;
     }
     const name = c.name.toLowerCase();
+    // Among equal matches, prefer what any package can import over what is
+    // private to one: the shared component is usually the one to reuse.
+    if (matched > 0 && c.import) score += 3;
     if (name === q) score += 1000;
     else if (name.startsWith(q)) score += 100;
     return { c, score, matched };
@@ -665,6 +692,18 @@ export function searchComponents(components: ComponentDoc[], query: string): Com
     .filter((s) => s.matched > 0)
     .sort((a, b) => b.matched - a.matched || b.score - a.score || a.c.name.localeCompare(b.c.name))
     .map((s) => s.c);
+}
+
+/**
+ * Lowercased text with a space before every word, camelCase hump and run of
+ * punctuation, so `includes(" " + term)` matches a term only at a word start.
+ */
+function words(text: string): string {
+  return ` ${text
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+    .replace(/[^A-Za-z0-9]+/g, " ")
+    .toLowerCase()}`;
 }
 
 // --- syntax helpers ---------------------------------------------------------

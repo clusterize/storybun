@@ -45,7 +45,7 @@ storybun                       Start the dev server
 storybun snapshot [options]    Capture every story and compare against its baseline
 storybun list [options]        Print every story key
 storybun shot <story> [opts]   Write a PNG of one story, leaving baselines untouched
-storybun components [query]    List the components stories demonstrate, or search them
+storybun components [query]    Index of the components stories demonstrate, or search them
 ```
 
 ## Story Format
@@ -104,10 +104,26 @@ Your stories already know which components exist and what they look like.
 query from the terminal instead of grepping for a component and its import path:
 
 ```bash
-storybun components                    # one line per component: name, import path, summary
-storybun components badge              # best matches in full
+storybun components                    # index: one line per component (name, import path, summary)
+storybun components badge              # the 5 best matches in full (--limit <n> for more)
 storybun components "status label"     # free text: names, paths, doc comments, variants
-storybun components --json             # the whole catalogue, machine-readable
+storybun components badge --json       # the same selection as JSON
+storybun components --full             # every component in full; large, rarely what you want
+```
+
+Search is the intended entry point, for coding agents especially: the full
+catalogue of a large project runs to megabytes, so nothing prints it unless
+asked for with `--full`. A query matches a component by its name, import
+paths, source path, doc comment and variants, each term at the start of a
+word or camelCase hump ("dialog" finds `AlertDialog`, "log" does not find
+`Dialog`). Story names and notes only rank the matches; a story note
+mentioning "dialog" does not make a component one. Among equal matches,
+components other packages can import rank above package-private ones, and
+the index marks the latter with the package they work in:
+
+```
+Badge        @acme/kit/ui  — A short status label.
+JobBoard     @/job/job-board  (inside @acme/app)
 ```
 
 ```
@@ -123,10 +139,14 @@ Badge
     danger — Something went wrong and needs a look.
   size: sm | md*
 
-  stories
+  stories  packages/kit/src/ui/badge.stories.tsx
     @acme/kit/Ui/Badge--Badge  — The default tone.
     @acme/kit/Ui/Badge--BadgeDanger
 ```
+
+A component without a doc comment shows `(no description)`, and
+`"description": null` in JSON, so the gaps are easy to find; the index counts
+them on stderr.
 
 Nothing is configured and nothing runs: the catalogue is read from source with
 the TypeScript parser (an optional peer dependency every `.tsx` project already
@@ -176,8 +196,8 @@ show no component are counted on stderr.
   use (the declaring file itself or a barrel re-exporting it; the shortest
   wins). `localImport` is the tsconfig `paths` alias the declaring package uses
   for its own files.
-- **Stories**: their keys (for `storybun shot`), the doc comment on each story
-  export, and the paths of existing baselines.
+- **Stories**: grouped by story file, their keys (for `storybun shot`), the
+  doc comment on each story export, and the paths of existing baselines.
 
 ## Configuration
 

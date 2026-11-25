@@ -1,20 +1,43 @@
 import { collectComponents, searchComponents, type ComponentDoc } from "./components.ts";
 import { loadConfig } from "./config.ts";
+import { print } from "./print.ts";
 import { scanStories } from "./scanner.ts";
 
 export interface ComponentsOptions {
-  /** Free-text search; unset lists every component. */
+  /** Free-text search; unset lists every component as a one-line index. */
   query?: string;
   json: boolean;
-  /** Most matches to print in full when searching (default 5). */
+  /** Every component in full instead of the index; with a query, every match. */
+  full: boolean;
+  /** Most matches shown in full when searching (default 5). */
   limit?: number;
 }
 
+/** One line of the index: enough to pick a component, small enough to list them all. */
+export interface ComponentSummary {
+  name: string;
+  /** The import line other packages use, else the package's own alias, else the source file. */
+  import: string;
+  /** Declaring package; an `import` that is not public resolves only inside it. */
+  package: string;
+  /** False when `import` is the package's own alias or a source path, usable only inside `package`. */
+  public: boolean;
+  /** First sentence of the doc comment; null when it has none. */
+  summary: string | null;
+  deprecated?: string;
+}
+
 /**
- * `storybun components [query]`: the component catalogue. Without a query it
- * prints one line per component; with one, the best matches in full -- the
- * import line, source location, doc comment, variants and stories -- so a
- * coding agent can pick and import a component without opening its stories.
+ * `storybun components [query]`: the component catalogue.
+ *
+ * - no query: a one-line index of every component (name, import, summary);
+ * - a query: the best `--limit` matches in full -- import lines, source,
+ *   doc comment, variants and stories;
+ * - `--full`: every component (or every match) in full.
+ *
+ * `--json` emits the same selection as JSON. The full catalogue of a large
+ * project is megabytes, far more than a coding agent's context should take,
+ * so nothing prints it unless asked for with `--full`.
  */
 export async function runComponents(cwd: string, options: ComponentsOptions): Promise<number> {
   const config = await loadConfig(cwd);
@@ -34,36 +57,72 @@ export async function runComponents(cwd: string, options: ComponentsOptions): Pr
   let components = result.components;
   if (query) {
     components = searchComponents(components, query);
-    if (!options.json) components = components.slice(0, options.limit ?? 5);
+    const matches = components.length;
+    if (!options.full) components = components.slice(0, options.limit ?? 5);
+    if (matches > components.length) {
+      console.error(`${components.length} of ${matches} matches; --limit <n> shows more.`);
+    }
   }
 
+  const detailed = Boolean(query) || options.full;
+
   if (options.json) {
-    console.log(JSON.stringify(components, null, 2));
+    await print(JSON.stringify(detailed ? components : components.map(summarize), null, 2));
     return components.length > 0 ? 0 : 1;
   }
 
   if (components.length === 0) {
-    console.error(query ? `No component matches ${JSON.stringify(query)}.` : "No component found in any story.");
+    console.error(
+      query
+        ? `No component matches ${JSON.stringify(query)}.`
+        : `No component found in ${stories.length} story file(s). ` +
+            "If they import components, are the project's dependencies installed?",
+    );
     return 1;
   }
 
-  if (query) {
-    console.log(components.map(formatComponent).join("\n\n"));
+  if (detailed) {
+    await print(components.map(formatComponent).join("\n\n"));
   } else {
     const width = Math.min(32, Math.max(...components.map((c) => c.name.length)));
-    for (const c of components) {
-      const from = /from '([^']+)'/.exec(c.import ?? c.localImport ?? "")?.[1] ?? c.file;
-      const summary = firstSentence(c.deprecated !== undefined ? `Deprecated. ${c.deprecated}` : c.description);
-      console.log(`${c.name.padEnd(width)}  ${from}${summary ? `  — ${summary}` : ""}`);
+    await print(
+      components
+        .map(summarize)
+        .map((c) => formatIndexLine(c, width))
+        .join("\n"),
+    );
+    const undocumented = components.filter((c) => c.description === null).length;
+    if (undocumented > 0) {
+      console.error(`\n${undocumented} of ${components.length} components have no doc comment.`);
     }
     if (result.unlinked.length > 0) {
       console.error(
-        `\n${result.unlinked.length} story file(s) demonstrate no component storybun could resolve; ` +
+        `${result.unlinked.length} story file(s) demonstrate no component storybun could resolve; ` +
           "name the component with an `@component` tag in the doc comment above the file's first import.",
       );
     }
   }
   return 0;
+}
+
+export function summarize(c: ComponentDoc): ComponentSummary {
+  const from = /from '([^']+)'/.exec(c.import ?? c.localImport ?? "")?.[1] ?? c.file;
+  return {
+    name: c.name,
+    import: from,
+    package: c.package,
+    public: c.import !== undefined,
+    summary: c.description ? firstSentence(c.description) : null,
+    ...(c.deprecated !== undefined ? { deprecated: c.deprecated } : {}),
+  };
+}
+
+/** One index line: name, where to import it from, and the summary (or why not to use it). */
+export function formatIndexLine(c: ComponentSummary, width = 0): string {
+  const summary =
+    c.deprecated !== undefined ? `Deprecated.${c.deprecated ? ` ${firstSentence(c.deprecated)}` : ""}` : c.summary;
+  const where = c.public ? "" : `  (inside ${c.package})`;
+  return `${c.name.padEnd(width)}  ${c.import}${where}${summary ? `  — ${summary}` : ""}`;
 }
 
 export function formatComponent(c: ComponentDoc): string {
@@ -72,9 +131,9 @@ export function formatComponent(c: ComponentDoc): string {
   if (c.import) lines.push(`  ${c.import}`);
   if (c.localImport) lines.push(`  ${c.localImport}  (inside ${c.package})`);
   lines.push(`  source  ${c.file}:${c.line}`);
-  if (c.description) lines.push("", indent(c.description, 2));
+  lines.push("", c.description ? indent(c.description, 2) : "  (no description)");
 
-  if (c.variants.length > 0) {
+  if (c.variants) {
     lines.push("");
     for (const axis of c.variants) {
       const values = axis.values.map((v) => (v.name === axis.default ? `${v.name}*` : v.name)).join(" | ");
@@ -86,9 +145,9 @@ export function formatComponent(c: ComponentDoc): string {
     }
   }
 
-  if (c.stories.length > 0) {
-    lines.push("", "  stories");
-    for (const s of c.stories) {
+  for (const group of c.stories) {
+    lines.push("", `  stories  ${group.file}`);
+    for (const s of group.stories) {
       lines.push(`    ${s.key}${s.description ? `  — ${firstSentence(s.description)}` : ""}`);
     }
   }
@@ -102,8 +161,7 @@ function indent(text: string, n: number): string {
     .join("\n");
 }
 
-function firstSentence(text: string | undefined): string {
-  if (!text) return "";
+function firstSentence(text: string): string {
   const flat = text.replace(/\s*\n\s*/g, " ").trim();
   const end = flat.search(/[.!?](\s|$)/);
   return end === -1 ? flat : flat.slice(0, end + 1);

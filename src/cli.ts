@@ -126,6 +126,7 @@ async function components(args: string[]) {
   const exitCode = await runComponents(cwd, {
     query: positionals(args).join(" ") || undefined,
     json: args.includes("--json"),
+    full: args.includes("--full"),
     limit: limit ? Number(limit) : undefined,
   });
   process.exit(exitCode);
@@ -160,7 +161,7 @@ Usage:
   storybun snapshot [options]    Capture and compare every story against its baseline
   storybun list [options]        Print every story key
   storybun shot <story> [opts]   Write a PNG of one story, leaving baselines untouched
-  storybun components [query]    List the components stories demonstrate, or search them
+  storybun components [query]    Index of the components stories demonstrate, or search them
 
 snapshot options:
   -u, --update       Accept the current render as the new baseline
@@ -183,8 +184,9 @@ shot options:
       --mode <name>      Snapshot mode to capture in (default: the first configured mode)
 
 components options:
-      --json             Emit the full catalogue (or every match) as JSON
-      --limit <n>        Matches printed in full when searching (default: 5)
+      --limit <n>        Matches shown in full when searching (default: 5)
+      --full             Every component (or every match) in full, not the index
+      --json             Emit the same selection as JSON
 `);
 }
 

@@ -458,7 +458,7 @@ export async function fingerprintStories(input: FingerprintInput): Promise<Map<s
   const enums = await collectEnums(graph, modules);
   const enumNames =
     enums.size > 0
-      ? new RegExp(`(?<![\\w$])(?:${[...enums.keys()].map((n) => n.replace(/\$/g, "\\$")).join("|")})(?![\\w$])`, "g")
+      ? new RegExp(`(?<![\\w$])(?:${[...enums.keys()].map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})(?![\\w$])`, "g")
       : null;
 
   const cwd = process.cwd();

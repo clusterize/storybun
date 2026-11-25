@@ -726,6 +726,11 @@ export async function captureAll(
       ? [[undefined, undefined]]
       : Object.entries(config.modes);
 
+  // What modes must agree on to share a page under `switchModesInPage`:
+  // locale and timezone belong to the browser context, not to the page.
+  const pageKey = (capture: { mode: SnapshotMode | undefined }) =>
+    JSON.stringify([capture.mode?.timezoneId ?? config.timezoneId, capture.mode?.locale ?? config.locale]);
+
   // Build work items: story × export × viewport × mode
   interface WorkItem {
     storyPath: string;
@@ -744,28 +749,39 @@ export async function captureAll(
         if (!key.includes(filter)) continue;
       }
       for (const viewport of config.viewports) {
+        const candidates: { planned: PlannedCapture; selected: boolean }[] = [];
         for (const [modeName, mode] of modeEntries) {
-          const outputPath = storyOutputPath(
-            config.outDir,
-            story.path,
-            exportName,
-            viewport,
-            singleViewport,
-            modeName,
-          );
           const planned: PlannedCapture = {
             story,
             storyKey: `${story.path}--${exportName}`,
             viewport,
             modeName,
             mode,
-            outputPath,
+            outputPath: storyOutputPath(config.outDir, story.path, exportName, viewport, singleViewport, modeName),
           };
-          if (options.select && !options.select(planned)) {
+          candidates.push({ planned, selected: !options.select || options.select(planned) });
+        }
+        // Modes that share a page are captured together or not at all. What
+        // a later mode shows can depend on the modes captured before it on
+        // that page, so capturing it alone, on a page of its own, could
+        // give an image the next run of both would not reproduce.
+        if (config.switchModesInPage) {
+          const due = new Set(candidates.filter((c) => c.selected).map((c) => pageKey(c.planned)));
+          for (const candidate of candidates) candidate.selected = due.has(pageKey(candidate.planned));
+        }
+        for (const { planned, selected } of candidates) {
+          if (!selected) {
             skipped.push(planned);
             continue;
           }
-          work.push({ storyPath: story.path, exportName, viewport, modeName, mode, outputPath });
+          work.push({
+            storyPath: story.path,
+            exportName,
+            viewport,
+            modeName: planned.modeName,
+            mode: planned.mode,
+            outputPath: planned.outputPath,
+          });
         }
       }
     }
@@ -787,6 +803,29 @@ export async function captureAll(
     contexts.set(modeName, await createContext(browser, config, fixedTime, mode));
   }
 
+  // Work items that share one page load. Normally that is one item each.
+  // With `switchModesInPage`, the modes of a story that differ only in
+  // colour scheme are captured on the same page, one after the other: the
+  // page is loaded and rendered for the first and the emulated scheme is
+  // switched for the rest. Locale and timezone belong to the browser
+  // context, so modes that differ in those still get a page of their own.
+  const visits: WorkItem[][] = [];
+  if (config.switchModesInPage) {
+    const byPage = new Map<string, WorkItem[]>();
+    for (const item of work) {
+      const key = JSON.stringify([item.storyPath, item.exportName, item.viewport, pageKey(item)]);
+      let visit = byPage.get(key);
+      if (!visit) {
+        visit = [];
+        byPage.set(key, visit);
+        visits.push(visit);
+      }
+      visit.push(item);
+    }
+  } else {
+    for (const item of work) visits.push([item]);
+  }
+
   let cursor = 0;
   let finished = 0;
 
@@ -802,82 +841,105 @@ export async function captureAll(
   // than the whole suite, and a comparison overlaps with the next render
   // instead of running as a serial pass afterwards. A hook that throws
   // fails this capture, not the run.
-  async function captureStory(item: WorkItem): Promise<void> {
-    const storyKey = `${item.storyPath}--${item.exportName}`;
-    const startedAt = performance.now();
-    let error: Error | undefined;
-    let outcome: string | undefined;
-    const page = await contexts.get(item.modeName)!.newPage();
+  async function captureVisit(items: WorkItem[]): Promise<void> {
+    const first = items[0]!;
+    const storyKey = `${first.storyPath}--${first.exportName}`;
+    // The first mode's context supplies the page, so its capture is taken
+    // exactly as it would be on a page of its own.
+    const page = await contexts.get(first.modeName)!.newPage();
+    // Set when the story never rendered: there is then nothing to switch
+    // the scheme on, and the remaining modes fail for the same reason.
+    let renderError: Error | undefined;
 
     try {
-      await page.setViewportSize({
-        width: item.viewport.width,
-        height: item.viewport.height,
-      });
+      for (const item of items) {
+        const startedAt = performance.now();
+        let error: Error | undefined;
+        let outcome: string | undefined;
 
-      await renderStory(page, serverUrl, storyKey, config);
+        try {
+          if (renderError) throw renderError;
+          if (item === first) {
+            try {
+              await page.setViewportSize({
+                width: item.viewport.width,
+                height: item.viewport.height,
+              });
+              await renderStory(page, serverUrl, storyKey, config);
+            } catch (err) {
+              renderError = err instanceof Error ? err : new Error(String(err));
+              throw renderError;
+            }
+          } else {
+            // An unset scheme means the browser default, which is light.
+            await page.emulateMedia({ colorScheme: item.mode?.colorScheme ?? "light" });
+            await waitForSettled(page, storyKey, config.settleTimeout);
+          }
 
-      const buffer = await captureStoryOrPage(page, storyKey, {
-        markerTimeoutMs: config.markerTimeout,
-        settleTimeoutMs: config.settleTimeout,
-      });
-      const dimensions = pngDimensions(buffer);
-      if (!dimensions) {
-        throw new Error(`${storyKey}: the screenshot is not a PNG`);
+          const buffer = await captureStoryOrPage(page, storyKey, {
+            markerTimeoutMs: config.markerTimeout,
+            settleTimeoutMs: config.settleTimeout,
+          });
+          const dimensions = pngDimensions(buffer);
+          if (!dimensions) {
+            throw new Error(`${storyKey}: the screenshot is not a PNG`);
+          }
+
+          const capture: CaptureResult = {
+            storyKey,
+            viewport: item.viewport,
+            mode: item.modeName,
+            buffer,
+            outputPath: item.outputPath,
+            dimensions,
+          };
+          const note = await hooks.onCapture?.(capture);
+          if (typeof note === "string") outcome = note;
+
+          results.push({
+            storyKey,
+            viewport: item.viewport,
+            mode: item.modeName,
+            outputPath: item.outputPath,
+            dimensions,
+          });
+        } catch (err) {
+          error = err instanceof Error ? err : new Error(String(err));
+          failures.push({
+            storyKey,
+            viewport: item.viewport,
+            mode: item.modeName,
+            outputPath: item.outputPath,
+            error,
+          });
+        } finally {
+          hooks.onProgress?.({
+            index: ++finished,
+            total: work.length,
+            storyKey,
+            mode: item.modeName,
+            viewport: item.viewport,
+            durationMs: performance.now() - startedAt,
+            error,
+            outcome,
+          });
+        }
       }
-
-      const capture: CaptureResult = {
-        storyKey,
-        viewport: item.viewport,
-        mode: item.modeName,
-        buffer,
-        outputPath: item.outputPath,
-        dimensions,
-      };
-      const note = await hooks.onCapture?.(capture);
-      if (typeof note === "string") outcome = note;
-
-      results.push({
-        storyKey,
-        viewport: item.viewport,
-        mode: item.modeName,
-        outputPath: item.outputPath,
-        dimensions,
-      });
-    } catch (err) {
-      error = err instanceof Error ? err : new Error(String(err));
-      failures.push({
-        storyKey,
-        viewport: item.viewport,
-        mode: item.modeName,
-        outputPath: item.outputPath,
-        error,
-      });
     } finally {
       await page.close();
-      hooks.onProgress?.({
-        index: ++finished,
-        total: work.length,
-        storyKey,
-        mode: item.modeName,
-        viewport: item.viewport,
-        durationMs: performance.now() - startedAt,
-        error,
-        outcome,
-      });
     }
   }
 
   async function worker() {
-    while (cursor < work.length) {
-      await captureStory(work[cursor++]!);
+    while (cursor < visits.length) {
+      await captureVisit(visits[cursor++]!);
     }
   }
 
   try {
     await Promise.all(Array.from({ length: concurrency }, () => worker()));
   } finally {
-    // `captureStory` closes its own page in a `finally`, so a story that
+    // `captureVisit` closes its own page in a `finally`, so a story that
     // throws does not leak one; the contexts are torn down here.
     for (const context of contexts.values()) {
       await context.close();

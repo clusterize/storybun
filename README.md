@@ -302,6 +302,10 @@ export default {
       light: { colorScheme: "light" },
       dark: { colorScheme: "dark" },
     },
+
+    // Capture the modes that differ only in `colorScheme` on one page load
+    // instead of a fresh page per mode (default: false). See below.
+    switchModesInPage: true,
   },
 } satisfies StorybunConfig;
 ```
@@ -312,6 +316,17 @@ on its own. It is meant for a theme that follows the OS preference: with the two
 modes above every story gets a light and a dark baseline without a story per
 theme. A theme read from storage instead of the media query does not react to a
 mode, and needs a Wrapper that maps the mode onto it.
+
+Loading the page is most of what a capture costs, and by default every mode
+loads it again. With `switchModesInPage`, a story is loaded and rendered once,
+captured, and the emulated colour scheme is switched for each further mode, so
+a light and a dark baseline take well under twice the time of one. Modes that
+also differ in `locale` or `timezoneId` keep a page of their own, since those
+belong to the browser context. Modes that share a page are always captured
+together, also when only one of them is due. The switch reaches the page as a change of
+`prefers-color-scheme`, exactly as when a user changes the OS setting: a theme
+that follows the media query renders the same as on a fresh page, while a story
+that reads the scheme only once, when it mounts, keeps its first mode's look.
 
 Turning modes on renames every baseline once (`X.png` becomes `X-light.png` and
 `X-dark.png`); the unsuffixed files are left in place and can be deleted.

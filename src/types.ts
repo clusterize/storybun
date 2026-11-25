@@ -97,6 +97,16 @@ export interface SnapshotConfig {
    */
   modes?: Record<string, SnapshotMode>;
   /**
+   * Capture the modes of a story that differ only in `colorScheme` on one
+   * page: the story is loaded and rendered once, captured, and the emulated
+   * scheme is switched for each further mode (default: false, a fresh page
+   * per mode). Loading the page is most of a capture's cost, so two modes
+   * take well under twice the time of one. It suits a theme that follows
+   * `prefers-color-scheme` as it changes; a story that reads the scheme only
+   * once, when it mounts, would keep its first mode's look.
+   */
+  switchModesInPage?: boolean;
+  /**
    * Anything about the rendering environment that the run cannot see for
    * itself, e.g. the tag of the CI image that supplies the system fonts.
    * It is part of every capture's fingerprint, so changing it captures
@@ -144,6 +154,7 @@ export interface ResolvedSnapshotConfig {
   locale: string;
   modes: Record<string, SnapshotMode>;
   environment: string;
+  switchModesInPage: boolean;
   report: {
     component: string | null;
   };

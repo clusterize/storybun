@@ -50,6 +50,7 @@ function config(overrides: Partial<ResolvedSnapshotConfig> = {}): ResolvedSnapsh
     locale: "en-US",
     modes: {},
     environment: "",
+    switchModesInPage: false,
     report: { component: null },
     ...overrides,
   };

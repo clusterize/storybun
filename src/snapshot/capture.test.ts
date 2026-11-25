@@ -738,6 +738,13 @@ describe("readiness contract (real chromium)", () => {
     packageName: "test-pkg",
   };
 
+  const fontsStory: StoryEntry = {
+    path: "fixtures/fonts",
+    filePath: join(fixturesDir, "fonts.stories.tsx"),
+    exports: ["MeasuredAtFirstRender"],
+    packageName: "test-pkg",
+  };
+
   // Any real font file will do for `/slow-font.ttf`; it only has to arrive
   // late. The fixture requests it after its frame's load event, which is
   // exactly the gap under test.
@@ -758,7 +765,7 @@ describe("readiness contract (real chromium)", () => {
   beforeAll(async () => {
     expect(SLOW_FONT).toBeDefined();
     const build = await buildSnapshotEntry(
-      [asyncStory, mediaStory, motionStory, clockStory],
+      [asyncStory, mediaStory, motionStory, clockStory, fontsStory],
       testPackages(),
       testConfig(),
       cwd,
@@ -900,6 +907,13 @@ describe("readiness contract (real chromium)", () => {
     } finally {
       await page.close();
     }
+  }, 20_000);
+
+  test("loads the page's declared fonts before the story's first render", async () => {
+    // A component that measures text during its first render must measure
+    // the web font, not the fallback it would otherwise still be showing.
+    const buffer = await captureSingle(fontsStory, "MeasuredAtFirstRender");
+    expect(pixelAt(buffer, 150, 80)).toEqual([0, 255, 0, 255]);
   }, 20_000);
 
   test("waits for a finite Web Animations API animation to finish", async () => {

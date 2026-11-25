@@ -148,6 +148,17 @@ async function renderStory() {
     ActiveWrapper = wrappers[pkgName];
   }` : ""}
 
+  // Load every font face the page declares before the story renders for the
+  // first time. A browser fetches a face only once some text uses it, so the
+  // first render otherwise runs against the fallback font, and a component
+  // that measures text during that render (a chart sizing its axis from its
+  // labels, a label fitted to its container) keeps the fallback's widths
+  // unless it happens to measure again. Whether the font or the render wins
+  // is a matter of timing, so such a story moved by a pixel or two from run
+  // to run. A face that fails to load is left to the browser's fallback, as
+  // it is in the app.
+  await Promise.allSettled([...document.fonts].map((face) => face.load()));
+
   const root = createRoot(document.getElementById("root")!);
   root.render(
     React.createElement(

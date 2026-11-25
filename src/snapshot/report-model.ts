@@ -71,6 +71,13 @@ export interface ReportSummary {
   removed: number;
   captureFailed: number;
   updated: number;
+  /**
+   * Captures left out because nothing they are rendered from changed since
+   * their baseline. They have no entry in `results` and are not part of
+   * `total`. Absent in reports written before the field existed; read that
+   * as 0.
+   */
+  unchanged?: number;
   /** The exit code of the run this report describes. */
   exitCode: number;
 }
@@ -111,6 +118,8 @@ export interface BuildReportInput {
   /** Comparison results, or null on an `--update` run. */
   compared: CompareResult[] | null;
   failures: CaptureFailure[];
+  /** How many captures the run left out as unchanged since their baseline. */
+  unchanged?: number;
   /** Absolute paths of baselines no story produced; see `findRemovedBaselines`. */
   removed: string[];
   /**
@@ -307,6 +316,7 @@ export async function buildReport(input: BuildReportInput): Promise<SnapshotRepo
     removed: 0,
     captureFailed: 0,
     updated: 0,
+    unchanged: input.unchanged ?? 0,
     exitCode: input.exitCode,
   };
   for (const e of entries) {

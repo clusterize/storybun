@@ -15,8 +15,11 @@ export interface CaptureProgress {
 }
 
 export interface CaptureHooks {
-  /** Called once with the number of captures the run will attempt. */
-  onStart?: (total: number) => void;
+  /**
+   * Called once with the number of captures the run will attempt and the
+   * number it leaves out because `CaptureOptions.select` turned them down.
+   */
+  onStart?: (total: number, skipped: number) => unknown;
   /**
    * Called inside the worker with each finished capture, pixels included,
    * before the next story on that worker starts. This is where the capture
@@ -72,9 +75,14 @@ export function formatPlan(
   modes: number,
   total: number,
   concurrency: number,
+  skipped = 0,
 ): string {
   const axes = [`${exports} ${exports === 1 ? "story" : "stories"} in ${stories} ${stories === 1 ? "file" : "files"}`];
   if (viewports > 1) axes.push(`${viewports} viewports`);
   if (modes > 0) axes.push(`${modes} ${modes === 1 ? "mode" : "modes"}`);
-  return `Capturing ${total} ${total === 1 ? "snapshot" : "snapshots"} (${axes.join(" × ")}) with concurrency ${concurrency}`;
+  const count = (n: number) => `${n} ${n === 1 ? "snapshot" : "snapshots"}`;
+  if (skipped > 0) {
+    return `Capturing ${total} of ${count(total + skipped)} (${axes.join(" × ")}) with concurrency ${concurrency}; ${skipped} unchanged since ${skipped === 1 ? "its" : "their"} baseline`;
+  }
+  return `Capturing ${count(total)} (${axes.join(" × ")}) with concurrency ${concurrency}`;
 }

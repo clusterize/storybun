@@ -96,6 +96,13 @@ export interface SnapshotConfig {
    * no suffix.
    */
   modes?: Record<string, SnapshotMode>;
+  /**
+   * Anything about the rendering environment that the run cannot see for
+   * itself, e.g. the tag of the CI image that supplies the system fonts.
+   * It is part of every capture's fingerprint, so changing it captures
+   * every story again (see "Capturing only what changed" in the README).
+   */
+  environment?: string;
   /** Report output written by `snapshot --json` / `--html`. */
   report?: {
     /**
@@ -136,6 +143,7 @@ export interface ResolvedSnapshotConfig {
   timezoneId: string;
   locale: string;
   modes: Record<string, SnapshotMode>;
+  environment: string;
   report: {
     component: string | null;
   };

@@ -677,6 +677,10 @@ export function DefaultReport({ report, imagePrefix }: ReportTemplateProps) {
   meta.push(`threshold ${config.threshold}`);
   if (config.maxDiffPixels > 0) meta.push(`up to ${config.maxDiffPixels} differing pixels tolerated`);
   if (config.clock) meta.push(`clock frozen at ${config.clock}`);
+  const unchanged = report.summary.unchanged ?? 0;
+  if (unchanged > 0) {
+    meta.push(`${unchanged} unchanged since ${unchanged === 1 ? "its" : "their"} baseline, not captured`);
+  }
   if (report.images === "review") meta.push("only images that need a look are published");
   meta.push(`generated ${report.generatedAt}`);
 

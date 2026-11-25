@@ -77,6 +77,7 @@ async function snapshot(args: string[]) {
   const { runSnapshots } = await import("./snapshot/index.ts");
 
   const update = args.includes("--update") || args.includes("-u");
+  const all = args.includes("--all");
   const codeowners = args.includes("--codeowners");
   const filter = flagValue(args, "--filter");
 
@@ -88,7 +89,7 @@ async function snapshot(args: string[]) {
     args.includes("--report-images") ? (flagValue(args, "--report-images") ?? "") : undefined,
   );
 
-  const exitCode = await runSnapshots(cwd, { update, filter, codeowners, json, html, quiet, reportImages });
+  const exitCode = await runSnapshots(cwd, { update, all, filter, codeowners, json, html, quiet, reportImages });
   process.exit(exitCode);
 }
 
@@ -158,13 +159,14 @@ function printHelp() {
 
 Usage:
   storybun                       Start the dev server
-  storybun snapshot [options]    Capture and compare every story against its baseline
+  storybun snapshot [options]    Capture and compare the changed stories against their baselines
   storybun list [options]        Print every story key
   storybun shot <story> [opts]   Write a PNG of one story, leaving baselines untouched
   storybun components [query]    Index of the components stories demonstrate, or search them
 
 snapshot options:
   -u, --update       Accept the current render as the new baseline
+      --all          Also capture stories unchanged since their baseline
       --filter <s>   Only stories whose key contains <s>
       --codeowners   Rewrite the CODEOWNERS entry for the snapshot directory
       --json [path]  Write a machine-readable report (default: <outDir>/report.json)

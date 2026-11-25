@@ -18,6 +18,7 @@ const outputs: Record<string, string> = {
   removed: String(s.removed),
   "capture-failed": String(s.captureFailed),
   updated: String(s.updated),
+  unchanged: String(s.unchanged ?? 0),
 };
 
 if (process.env.GITHUB_OUTPUT) {

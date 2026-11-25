@@ -38,9 +38,31 @@ export interface CaptureResult extends CaptureRecord {
   buffer: Buffer;
 }
 
+/** One capture the run has planned, before anything is rendered. */
+export interface PlannedCapture {
+  story: StoryEntry;
+  storyKey: string;
+  viewport: { width: number; height: number; name?: string };
+  /** Name of the snapshot mode; unset when none are configured. */
+  modeName: string | undefined;
+  mode: SnapshotMode | undefined;
+  outputPath: string;
+}
+
+export interface CaptureOptions {
+  /**
+   * Called once per planned capture; returning false leaves it out of the
+   * run. It is how a run skips captures whose inputs have not changed since
+   * their baseline. Left-out captures come back in `CaptureOutcome.skipped`.
+   */
+  select?: (capture: PlannedCapture) => boolean;
+}
+
 export interface CaptureOutcome {
   captures: CaptureRecord[];
   failures: CaptureFailure[];
+  /** Planned captures `CaptureOptions.select` turned down. */
+  skipped: PlannedCapture[];
 }
 
 // The bare `<key>.png` name is kept for the single-viewport, no-modes case so
@@ -689,9 +711,11 @@ export async function captureAll(
   serverUrl: string,
   filter?: string,
   hooks: CaptureHooks = {},
+  options: CaptureOptions = {},
 ): Promise<CaptureOutcome> {
   const results: CaptureRecord[] = [];
   const failures: CaptureFailure[] = [];
+  const skipped: PlannedCapture[] = [];
   const singleViewport = config.viewports.length === 1;
 
   validateModeNames(config.modes);
@@ -721,21 +745,27 @@ export async function captureAll(
       }
       for (const viewport of config.viewports) {
         for (const [modeName, mode] of modeEntries) {
-          work.push({
-            storyPath: story.path,
+          const outputPath = storyOutputPath(
+            config.outDir,
+            story.path,
             exportName,
+            viewport,
+            singleViewport,
+            modeName,
+          );
+          const planned: PlannedCapture = {
+            story,
+            storyKey: `${story.path}--${exportName}`,
             viewport,
             modeName,
             mode,
-            outputPath: storyOutputPath(
-              config.outDir,
-              story.path,
-              exportName,
-              viewport,
-              singleViewport,
-              modeName,
-            ),
-          });
+            outputPath,
+          };
+          if (options.select && !options.select(planned)) {
+            skipped.push(planned);
+            continue;
+          }
+          work.push({ storyPath: story.path, exportName, viewport, modeName, mode, outputPath });
         }
       }
     }
@@ -744,7 +774,7 @@ export async function captureAll(
   const concurrency = Math.min(config.concurrency, work.length || 1);
   const fixedTime = resolveFixedTime(config.clock);
 
-  hooks.onStart?.(work.length);
+  await hooks.onStart?.(work.length, skipped.length);
 
   // One context per mode, shared by every page captured in that mode, with
   // the clock frozen once on it (see `createContext`). Each capture still
@@ -854,5 +884,5 @@ export async function captureAll(
     }
   }
 
-  return { captures: results, failures };
+  return { captures: results, failures, skipped };
 }

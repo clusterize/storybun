@@ -47,8 +47,22 @@ export function headline(report: SnapshotReport): string {
   return parts.length > 0 ? parts.join(", ") : "match the baseline";
 }
 
+/** "; 4,810 unchanged since their baseline were not captured", or nothing. */
+export function unchangedNote(report: SnapshotReport): string {
+  const n = report.summary.unchanged ?? 0;
+  if (n === 0) return "";
+  return `${n.toLocaleString("en-US")} unchanged since ${n === 1 ? "its" : "their"} baseline ${n === 1 ? "was" : "were"} not captured`;
+}
+
 export function summaryTable(report: SnapshotReport): string {
   const s = report.summary;
+  if (s.unchanged) {
+    return [
+      "| passed | changed | new | removed | capture failed | unchanged, not captured |",
+      "| --: | --: | --: | --: | --: | --: |",
+      `| ${s.passed} | ${s.changed} | ${s.new} | ${s.removed} | ${s.captureFailed} | ${s.unchanged} |`,
+    ].join("\n");
+  }
   return [
     "| passed | changed | new | removed | capture failed |",
     "| --: | --: | --: | --: | --: |",
@@ -69,7 +83,8 @@ export function buildComment(report: SnapshotReport, options: CommentOptions = {
   const lines: string[] = [COMMENT_MARKER];
 
   if (!needsReview(report)) {
-    lines.push(`Visual snapshots ${headline(report)}${at}.`);
+    const note = unchangedNote(report);
+    lines.push(`Visual snapshots ${headline(report)}${at}.${note ? ` ${note[0]!.toUpperCase()}${note.slice(1)}.` : ""}`);
     return lines.join("\n");
   }
 
